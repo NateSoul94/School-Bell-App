@@ -152,6 +152,11 @@ def ensure_tables_exist():
         
         conn.commit()
         conn.close()
+
+        ensure_days_preset_column()
+        ensure_schedule_color_column()
+        ensure_colors_table()
+
         logging.info("Database tables verified and initialized")
         return True
         
@@ -186,27 +191,141 @@ def ensure_days_preset_column():
         return False
 
 
+def ensure_schedule_color_column():
+    """Ensure the Schedule table has a Color column."""
+    connection_string = get_connection_string()
+    if not connection_string:
+        return False
+
+    try:
+        conn = sqlite3.connect(connection_string)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(Schedule)")
+        columns = {row[1] for row in cursor.fetchall()}
+
+        if columns and "Color" not in columns:
+            cursor.execute("ALTER TABLE Schedule ADD COLUMN Color TEXT DEFAULT ''")
+            conn.commit()
+            logging.info("Added Color column to Schedule table")
+
+        conn.close()
+        return True
+    except Exception as e:
+        logging.error(f"Error ensuring schedule color column: {e}")
+        return False
+
+
+def ensure_colors_table():
+    """Ensure the Colors table exists, is deduplicated, and has sane defaults."""
+    connection_string = get_connection_string()
+    if not connection_string:
+        return False
+
+    default_colors = [
+        ("No Color", ""),
+        ("Red", "#FFCDD2"),
+        ("Orange", "#FFE0B2"),
+        ("Yellow", "#FFF9C4"),
+        ("Green", "#C8E6C9"),
+        ("Blue", "#BBDEFB"),
+        ("Purple", "#E1BEE7"),
+        ("Pink", "#F8BBD0"),
+        ("Gray", "#E0E0E0")
+    ]
+
+    conn = None
+    try:
+        conn = sqlite3.connect(connection_string)
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS Colors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Hex TEXT,
+                Name TEXT NOT NULL
+            )
+        ''')
+
+        cursor.execute("PRAGMA table_info(Colors)")
+        columns = {row[1] for row in cursor.fetchall()}
+
+        if "Hex" not in columns:
+            cursor.execute("ALTER TABLE Colors ADD COLUMN Hex TEXT")
+        if "Name" not in columns:
+            cursor.execute("ALTER TABLE Colors ADD COLUMN Name TEXT")
+
+        cursor.execute("DELETE FROM Colors WHERE TRIM(COALESCE(Name, '')) = ''")
+        cursor.execute('''
+            DELETE FROM Colors
+            WHERE rowid NOT IN (
+                SELECT MIN(rowid)
+                FROM Colors
+                WHERE TRIM(COALESCE(Name, '')) != ''
+                GROUP BY LOWER(TRIM(Name))
+            )
+            AND TRIM(COALESCE(Name, '')) != ''
+        ''')
+
+        try:
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_colors_name_unique ON Colors(Name COLLATE NOCASE)"
+            )
+        except sqlite3.Error as index_error:
+            logging.warning(f"Could not create unique Colors index: {index_error}")
+
+        cursor.execute("SELECT COUNT(*) FROM Colors")
+        color_count = cursor.fetchone()[0]
+
+        if color_count == 0:
+            for name, hex_value in default_colors:
+                cursor.execute(
+                    "INSERT INTO Colors (Name, Hex) VALUES (?, ?)",
+                    (name, hex_value)
+                )
+
+        conn.commit()
+        return True
+    except Exception as e:
+        logging.error(f"Error ensuring Colors table: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
 # Schedule operations
 @database_operation
 def fetch_schedule_from_db(conn, preset):
     """Fetch schedule for a given preset from database."""
+    ensure_schedule_color_column()
+
     try:
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT Period, Start_Time, End_Time, Audio_Start, Audio_End, Volume 
-            FROM Schedule WHERE Preset = ?
-            ORDER BY Start_Time
-        """, (preset,))
+
+        try:
+            cursor.execute("""
+                SELECT Period, Start_Time, End_Time, Audio_Start, Audio_End, Volume, Color
+                FROM Schedule WHERE Preset = ?
+                ORDER BY Start_Time
+            """, (preset,))
+            rows = cursor.fetchall()
+        except sqlite3.OperationalError:
+            cursor.execute("""
+                SELECT Period, Start_Time, End_Time, Audio_Start, Audio_End, Volume
+                FROM Schedule WHERE Preset = ?
+                ORDER BY Start_Time
+            """, (preset,))
+            rows = cursor.fetchall()
         
         schedule = []
-        for row in cursor.fetchall():
+        for row in rows:
             schedule.append({
                 "period": row[0],
                 "start": row[1],
                 "end": row[2],
                 "audio_start": row[3].split(',') if row[3] else [],
                 "audio_end": row[4].split(',') if row[4] else [],
-                "volume": row[5] if row[5] is not None else 1.0
+                "volume": row[5] if row[5] is not None else 1.0,
+                "color": row[6] if len(row) > 6 and row[6] else ""
             })
         return schedule
     except sqlite3.Error as e:
@@ -214,6 +333,44 @@ def fetch_schedule_from_db(conn, preset):
         return []
     except Exception as e:
         logging.error(f"Error fetching schedule from database: {e}")
+        return []
+
+
+@database_operation
+def fetch_colors_from_db(conn):
+    """Fetch available row colors from the Colors table."""
+    ensure_colors_table()
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT Name, Hex
+            FROM Colors
+            WHERE TRIM(COALESCE(Name, '')) != ''
+            ORDER BY CASE WHEN TRIM(COALESCE(Hex, '')) = '' THEN 0 ELSE 1 END, Name
+        """)
+
+        colors = []
+        seen_names = set()
+        for row in cursor.fetchall():
+            color_name = (row[0] or "").strip()
+            color_hex = (row[1] or "").strip()
+
+            if not color_name:
+                continue
+
+            dedupe_key = color_name.lower()
+            if dedupe_key in seen_names:
+                continue
+            seen_names.add(dedupe_key)
+            colors.append({"name": color_name, "hex": color_hex})
+
+        return colors
+    except sqlite3.Error as e:
+        logging.error(f"Database error fetching colors: {e}")
+        return []
+    except Exception as e:
+        logging.error(f"Error fetching colors from database: {e}")
         return []
 
 
@@ -235,7 +392,8 @@ def update_schedule_in_db(preset, period, field, value):
             "end": "End_Time",
             "audio_start": "Audio_Start",
             "audio_end": "Audio_End",
-            "volume": "Volume"
+            "volume": "Volume",
+            "color": "Color"
         }
         
         db_field = field_mapping.get(field, field)
@@ -270,10 +428,11 @@ def insert_schedule_row(preset, period_data):
         # Prepare audio fields
         audio_start = ','.join(period_data.get('audio_start', [])) if isinstance(period_data.get('audio_start'), list) else period_data.get('audio_start', '')
         audio_end = ','.join(period_data.get('audio_end', [])) if isinstance(period_data.get('audio_end'), list) else period_data.get('audio_end', '')
+        color = period_data.get('color', '') or ''
         
         cursor.execute("""
-            INSERT INTO Schedule (Period, Start_Time, End_Time, Audio_Start, Audio_End, Volume, Preset) 
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO Schedule (Period, Start_Time, End_Time, Audio_Start, Audio_End, Volume, Preset, Color) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             period_data.get('period', ''),
             period_data.get('start', '00:00:00'),
@@ -281,7 +440,8 @@ def insert_schedule_row(preset, period_data):
             audio_start,
             audio_end,
             period_data.get('volume', 1.0),
-            preset
+            preset,
+            color
         ))
         conn.commit()
         return True
@@ -799,6 +959,9 @@ def initialize_database():
     try:
         success = ensure_tables_exist()
         if success:
+            ensure_days_preset_column()
+            ensure_schedule_color_column()
+            ensure_colors_table()
             logging.info("Database initialized successfully")
         return success
     except Exception as e:

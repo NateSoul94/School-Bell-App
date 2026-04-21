@@ -30,7 +30,7 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem, QPushButton, QSlider, QFrame, QLCDNumber, QProgressBar,
     QHeaderView, QComboBox, QCheckBox, QSystemTrayIcon, QMenu, QSizePolicy
 )
-from PyQt6.QtGui import QIcon, QGuiApplication, QPixmap
+from PyQt6.QtGui import QIcon, QGuiApplication, QPixmap, QColor, QBrush
 from PyQt6.QtCore import QTimer, Qt, QEvent
 
 # Import our modular components
@@ -47,7 +47,8 @@ from database import (
     update_lock_state_in_db, fetch_password_from_db, save_password_to_db,
     fetch_days_from_db, update_day_status_in_db, save_day_preset_in_db,
     fetch_preset_for_day, update_schedule_in_db, insert_schedule_row, delete_schedule_row,
-    create_preset, delete_preset, initialize_database, test_database_connection
+    create_preset, delete_preset, initialize_database, test_database_connection,
+    fetch_colors_from_db
 )
 from audio_manager import get_audio_manager, stop_audio
 from schedule_manager import get_schedule_manager, get_local_time, get_day_name
@@ -88,6 +89,7 @@ class SchoolBellApp(QMainWindow):
         self.digital_height = 50
         self.current_time = "00:00:00"
         self.current_language = "English"
+        self.available_row_colors = []
         
         # Initialize managers
         self.audio_manager = get_audio_manager()
@@ -336,6 +338,9 @@ class SchoolBellApp(QMainWindow):
         
         # Load presets
         self.load_presets()
+
+        # Load row color options
+        self.load_color_options()
         
         # Load audio directory
         self.load_audio_directory()
@@ -435,9 +440,22 @@ class SchoolBellApp(QMainWindow):
                 self.current_preset = None
                 self.current_schedule = []
                 self.current_preset_label.setText("Preset: None")
+
+            self.sync_selected_row_color()
                 
         except Exception as e:
             logging.error(f"Error loading current preset: {e}")
+
+    def load_color_options(self):
+        """Load available row colors from the database."""
+        try:
+            self.available_row_colors = fetch_colors_from_db() or []
+            if self.menu_bar and hasattr(self.menu_bar, 'refresh_row_color_options'):
+                self.menu_bar.refresh_row_color_options(self.available_row_colors)
+            self.sync_selected_row_color()
+            logging.info(f"Loaded {len(self.available_row_colors)} row colors")
+        except Exception as e:
+            logging.error(f"Error loading row colors: {e}")
     
     def load_audio_directory(self):
         """Load audio directory from database."""
@@ -457,6 +475,79 @@ class SchoolBellApp(QMainWindow):
         except Exception as e:
             logging.error(f"Error loading audio directory: {e}")
     
+    def sync_selected_row_color(self):
+        """Sync the Tables > Color combo with the selected schedule row."""
+        if not self.menu_bar or not hasattr(self.menu_bar, 'set_selected_row_color'):
+            return
+
+        color_hex = ""
+        if self.selected_row is not None and 0 <= self.selected_row < len(self.current_schedule):
+            color_hex = self.current_schedule[self.selected_row].get("color", "") or ""
+
+        self.menu_bar.set_selected_row_color(color_hex)
+
+    def apply_selected_row_color(self, color_hex, color_name=None):
+        """Apply the chosen color to the currently selected schedule row."""
+        try:
+            if self.selected_row is None or self.selected_row < 0:
+                return
+            if self.selected_row >= len(self.current_schedule):
+                return
+
+            color_hex = (color_hex or "").strip()
+            self.current_schedule[self.selected_row]["color"] = color_hex
+            self._apply_color_to_row(self.selected_row, color_hex)
+
+            if self.current_preset:
+                period_name = self.current_schedule[self.selected_row].get("period", "")
+                if period_name:
+                    update_schedule_in_db(self.current_preset, period_name, "color", color_hex)
+
+            if self.schedule_manager:
+                self.schedule_manager.clear_schedule_cache()
+
+            logging.info(f"Row color updated for row {self.selected_row}: {color_name or color_hex or 'No Color'}")
+        except Exception as e:
+            logging.error(f"Error applying selected row color: {e}")
+            show_error_message(f"Failed to apply row color: {str(e)}", "Error", self)
+
+    def _apply_color_to_row(self, row, color_hex):
+        """Apply background coloring to all visible cells in a schedule row."""
+        try:
+            color_hex = (color_hex or "").strip()
+            use_color = bool(color_hex)
+            background_color = QColor(color_hex) if use_color else QColor()
+
+            if use_color and not background_color.isValid():
+                logging.warning(f"Invalid row color skipped: {color_hex}")
+                return
+
+            brightness = (
+                ((background_color.red() * 299) + (background_color.green() * 587) + (background_color.blue() * 114)) / 1000
+                if use_color else 255
+            )
+            foreground_color = QColor("#000000" if brightness >= 186 else "#FFFFFF")
+
+            for column in range(self.table.columnCount()):
+                item = self.table.item(row, column)
+                if item:
+                    if use_color:
+                        item.setBackground(QBrush(background_color))
+                        item.setForeground(QBrush(foreground_color))
+                    else:
+                        item.setData(Qt.ItemDataRole.BackgroundRole, None)
+                        item.setData(Qt.ItemDataRole.ForegroundRole, None)
+
+                widget = self.table.cellWidget(row, column)
+                if widget:
+                    if use_color:
+                        widget.setStyleSheet(f"background-color: {color_hex}; border: none;")
+                    else:
+                        widget.setStyleSheet("")
+
+        except Exception as e:
+            logging.error(f"Error applying row color styling: {e}")
+
     def load_days_table(self):
         """Load and populate the days table."""
         try:
@@ -593,7 +684,10 @@ class SchoolBellApp(QMainWindow):
                     volume_widget.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
                 
                 self.table.setCellWidget(row, 5, volume_widget)
+                self._apply_color_to_row(row, period.get("color", ""))
             
+            self.sync_selected_row_color()
+
             # Force garbage collection
             gc.collect()
             
@@ -810,6 +904,7 @@ class SchoolBellApp(QMainWindow):
         """Refresh the application data."""
         try:
             self.load_presets()
+            self.load_color_options()
             self.load_audio_directory()
             self.load_days_table()
             self.update_status_label()
@@ -1409,6 +1504,7 @@ class SchoolBellApp(QMainWindow):
         """Handle table cell click events."""
         try:
             self.selected_row = row
+            self.sync_selected_row_color()
             
             # Handle time picker for time columns
             if column in [1, 2]:  # Start time or end time
@@ -1474,6 +1570,9 @@ class SchoolBellApp(QMainWindow):
                          (new_period, old_period, self.current_preset))
             conn.commit()
             conn.close()
+
+            if self.schedule_manager:
+                self.schedule_manager.clear_schedule_cache()
         except Exception as e:
             logging.error(f"Error updating period in database: {e}")
             show_error_message(f"Error updating period in database: {e}", "Error", self)
@@ -1489,6 +1588,7 @@ class SchoolBellApp(QMainWindow):
             end = self.table.item(row, 2).text() if self.table.item(row, 2) else ""
             audio_start = self.table.item(row, 3).text() if self.table.item(row, 3) else ""
             audio_end = self.table.item(row, 4).text() if self.table.item(row, 4) else ""
+            color = self.current_schedule[row].get("color", "") if row < len(self.current_schedule) else ""
 
             # Get volume from slider
             volume_widget = self.table.cellWidget(row, 5)
@@ -1509,16 +1609,19 @@ class SchoolBellApp(QMainWindow):
             if exists:
                 # Update existing row
                 cursor.execute("""UPDATE Schedule SET Start_Time = ?, End_Time = ?, Audio_Start = ?, 
-                                 Audio_End = ?, Volume = ? WHERE Period = ? AND Preset = ?""",
-                             (start, end, audio_start, audio_end, volume, period, self.current_preset))
+                                 Audio_End = ?, Volume = ?, Color = ? WHERE Period = ? AND Preset = ?""",
+                             (start, end, audio_start, audio_end, volume, color, period, self.current_preset))
             else:
                 # Insert new row
                 cursor.execute("""INSERT INTO Schedule (Period, Start_Time, End_Time, Audio_Start, 
-                                 Audio_End, Volume, Preset) VALUES (?, ?, ?, ?, ?, ?, ?)""", 
-                             (period, start, end, audio_start, audio_end, volume, self.current_preset))
+                                 Audio_End, Volume, Preset, Color) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", 
+                             (period, start, end, audio_start, audio_end, volume, self.current_preset, color))
             
             conn.commit()
             conn.close()
+
+            if self.schedule_manager:
+                self.schedule_manager.clear_schedule_cache()
             
         except Exception as e:
             logging.error(f"Error updating row in database: {e}")
@@ -1768,9 +1871,14 @@ class SchoolBellApp(QMainWindow):
                 "end": "00:00:00",
                 "audio_start": [],
                 "audio_end": [],
-                "volume": 1.0
+                "volume": 1.0,
+                "color": ""
             })
             self.table.blockSignals(False)
+
+            self.selected_row = row_count
+            self.table.selectRow(row_count)
+            self.sync_selected_row_color()
 
             # Insert into database
             from src.config import get_connection_string
@@ -1778,10 +1886,13 @@ class SchoolBellApp(QMainWindow):
             
             conn = sqlite3.connect(get_connection_string())
             cursor = conn.cursor()
-            cursor.execute("INSERT INTO Schedule (Period, Start_Time, End_Time, Audio_Start, Audio_End, Volume, Preset) VALUES (?, ?, ?, ?, ?, ?, ?)", 
-                        (period_value, "00:00:00", "00:00:00", "", "", 1.0, self.current_preset))
+            cursor.execute("INSERT INTO Schedule (Period, Start_Time, End_Time, Audio_Start, Audio_End, Volume, Preset, Color) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
+                        (period_value, "00:00:00", "00:00:00", "", "", 1.0, self.current_preset, ""))
             conn.commit()
             conn.close()
+
+            if self.schedule_manager:
+                self.schedule_manager.clear_schedule_cache()
             
             logging.info(f"Added new row: {period_value}")
                 
@@ -1821,6 +1932,12 @@ class SchoolBellApp(QMainWindow):
                 if delete_schedule_row(self.current_preset, period):
                     # Remove from current schedule
                     self.current_schedule = [p for p in self.current_schedule if p.get('period') != period]
+                    self.selected_row = None
+                    self.sync_selected_row_color()
+
+                    if self.schedule_manager:
+                        self.schedule_manager.clear_schedule_cache()
+
                     # Refresh table
                     self.populate_schedule_table()
                     logging.info(f"Deleted row: Period {period}")

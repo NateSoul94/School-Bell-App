@@ -34,7 +34,8 @@ from config import (
 )
 from database import (
     fetch_presets_from_db, save_language_to_db, save_theme_to_db,
-    fetch_theme_from_db, save_font_settings_to_db, fetch_font_settings_from_db
+    fetch_theme_from_db, save_font_settings_to_db, fetch_font_settings_from_db,
+    fetch_colors_from_db
 )
 
 
@@ -66,6 +67,9 @@ class TranslationManager:
                 "Tables": "&Tables",
                 "New Row": "New Row",
                 "Delete Row": "Delete Row",
+                "Color": "Color",
+                "Choose Color:": "Color",
+                "No Color": "No Color",
                 "View": "&View",
                 "Full Screen": "Full Screen",
                 "Change Font": "Change Font",
@@ -110,6 +114,9 @@ class TranslationManager:
                 "Tables": "الجداول",
                 "New Row": "صف جديد",
                 "Delete Row": "حذف الصف",
+                "Color": "اللون",
+                "Choose Color:": "اللون:",
+                "No Color": "بدون لون",
                 "View": "عرض",
                 "Full Screen": "ملء الشاشة",
                 "Change Font": "تغيير الخط",
@@ -155,6 +162,8 @@ class MenuBar(QMenuBar):
         self.preset_combo = None
         self.theme_combo = None
         self.language_combo = None
+        self.row_color_combo = None
+        self.row_color_label = None
         self.database_label = None
         self.lock_action = None
         
@@ -329,6 +338,23 @@ class MenuBar(QMenuBar):
         delete_row_action = QAction(translation["Delete Row"], self)
         delete_row_action.triggered.connect(self._safe_call('delete_selected_row'))
         self.tables_menu.addAction(delete_row_action)
+
+        color_action = QWidgetAction(self)
+        color_widget = QWidget(self)
+        color_layout = QVBoxLayout(color_widget)
+        color_layout.setContentsMargins(8, 4, 8, 4)
+
+        self.row_color_label = QLabel(translation.get("Choose Color:", "Color"), self)
+        self.row_color_combo = QComboBox(self)
+        self.row_color_combo.currentIndexChanged.connect(self._handle_row_color_changed)
+
+        color_layout.addWidget(self.row_color_label)
+        color_layout.addWidget(self.row_color_combo)
+        color_widget.setLayout(color_layout)
+        color_action.setDefaultWidget(color_widget)
+        self.tables_menu.addAction(color_action)
+
+        self.refresh_row_color_options()
     
     def init_view_menu(self, translation):
         """Initialize view menu."""
@@ -593,6 +619,11 @@ class MenuBar(QMenuBar):
                             for label in preset_labels:
                                 if "Preset" in label.text() or "الجدول" in label.text():
                                     label.setText(translation.get("Choose Preset:", "Choose Preset:"))
+
+            # Update tables menu color label
+            if self.row_color_label is not None:
+                self.row_color_label.setText(translation.get("Choose Color:", "Color"))
+            self.refresh_row_color_options()
                                     
         except Exception as e:
             logging.error(f"Error updating widget labels: {e}")
@@ -644,6 +675,70 @@ class MenuBar(QMenuBar):
             
         except Exception as e:
             logging.error(f"Error refreshing presets: {e}")
+
+    def refresh_row_color_options(self, colors=None):
+        """Refresh the row color combo box from the Colors table."""
+        if self.row_color_combo is None:
+            return
+
+        try:
+            colors = colors if colors is not None else (fetch_colors_from_db() or [])
+            current_hex = self.row_color_combo.currentData()
+            no_color_label = self.translation_manager.get_translation(self.current_language, "No Color", "No Color")
+
+            self.row_color_combo.blockSignals(True)
+            self.row_color_combo.clear()
+            self.row_color_combo.addItem(no_color_label, "")
+
+            seen_names = {"no color", no_color_label.lower()}
+            for color in colors:
+                color_name = color.get("name", "").strip()
+                color_hex = (color.get("hex", "") or "").strip()
+
+                if not color_name:
+                    continue
+
+                dedupe_key = color_name.lower()
+                if dedupe_key in seen_names:
+                    continue
+                seen_names.add(dedupe_key)
+
+                if not color_hex and color_name.lower() in {"no color", no_color_label.lower()}:
+                    continue
+
+                self.row_color_combo.addItem(color_name, color_hex)
+
+            index = self.row_color_combo.findData(current_hex)
+            self.row_color_combo.setCurrentIndex(index if index >= 0 else 0)
+            self.row_color_combo.blockSignals(False)
+
+        except Exception as e:
+            logging.error(f"Error refreshing row colors: {e}")
+
+    def set_selected_row_color(self, color_hex):
+        """Update the color combo to match the selected schedule row."""
+        if self.row_color_combo is None:
+            return
+
+        try:
+            self.row_color_combo.blockSignals(True)
+            index = self.row_color_combo.findData(color_hex or "")
+            self.row_color_combo.setCurrentIndex(index if index >= 0 else 0)
+            self.row_color_combo.blockSignals(False)
+        except Exception as e:
+            logging.error(f"Error setting selected row color: {e}")
+
+    def _handle_row_color_changed(self, index):
+        """Apply the chosen row color to the selected schedule row."""
+        try:
+            if index < 0 or not self.parent_app or not hasattr(self.parent_app, 'apply_selected_row_color'):
+                return
+
+            color_hex = self.row_color_combo.itemData(index) if self.row_color_combo else ""
+            color_name = self.row_color_combo.itemText(index) if self.row_color_combo else ""
+            self.parent_app.apply_selected_row_color(color_hex, color_name)
+        except Exception as e:
+            logging.error(f"Error handling row color change: {e}")
 
 
 class AboutWindow(QMainWindow):

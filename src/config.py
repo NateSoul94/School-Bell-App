@@ -49,11 +49,12 @@ SUPPORTED_AUDIO_FORMATS = ['.mp3', '.wav', '.ogg']
 DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 DATABASE_TABLES = {
-    'Schedule': ['Period', 'Start_Time', 'End_Time', 'Audio_Start', 'Audio_End', 'Volume', 'Preset'],
+    'Schedule': ['Period', 'Start_Time', 'End_Time', 'Audio_Start', 'Audio_End', 'Volume', 'Preset', 'Color'],
     'Presets': ['name'],
     'Settings': ['id', 'language', 'theme', 'font', 'font_weight', 'font_size', 'height', 
                 'directory', 'preset', 'active', 'password', 'lock'],
-    'days': ['id', 'day_name', 'active', 'preset']
+    'days': ['id', 'day_name', 'active', 'preset'],
+    'Colors': ['Name', 'Hex']
 }
 
 LOG_CONFIG = {
