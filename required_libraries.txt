@@ -1,0 +1,8 @@
+# Core runtime dependencies (required to run the School Bell App)
+PyQt6==6.10.2
+pygame==2.6.1
+
+# Optional utilities used by bundled diagnostics/tools scripts
+psutil==7.0.0
+pandas==2.2.3
+matplotlib==3.10.7
