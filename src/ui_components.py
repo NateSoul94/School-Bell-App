@@ -1022,9 +1022,16 @@ def select_directory(title="Select Directory", directory="", parent=None):
 def select_font(current_font=None, parent=None):
     """Show font selection dialog."""
     try:
-        font, ok = QFontDialog.getFont(current_font, parent)
-        if ok:
-            return font, True
+        # Keep the chooser independent from the main window stylesheet.
+        dialog = QFontDialog()
+        if current_font is not None:
+            dialog.setCurrentFont(current_font)
+        if parent is not None:
+            dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+            dialog.setWindowIcon(parent.windowIcon())
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            return dialog.currentFont(), True
         return current_font, False
     except Exception as e:
         logging.error(f"Error selecting font: {e}")
