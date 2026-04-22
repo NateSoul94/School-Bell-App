@@ -37,7 +37,8 @@ APP_AUTHOR = "Ali Qasem"
 
 DEFAULT_CONFIG = {
     "db_file": "Jaras.db",
-    "db_path": None
+    "db_path": None,
+    "use_custom_db_path": False
 }
 
 SUPPORTED_LANGUAGES = ["English", "Arabic"]
@@ -169,14 +170,19 @@ class ConfigManager:
         """Get the current database path."""
         db_path = self.config.get("db_path")
         db_file = self.config.get("db_file", "Jaras.db")
-        
-        if db_path and os.path.exists(db_path):
+        use_custom_db_path = bool(self.config.get("use_custom_db_path", False))
+
+        # If user explicitly selected a custom database, prefer that path.
+        if use_custom_db_path and db_path and os.path.exists(db_path):
             return db_path
-        
-        # Try base directory
+
+        # Otherwise prefer the local app database in the current base directory.
         base_path = os.path.join(BASE_DIR, db_file)
         if os.path.exists(base_path):
             return base_path
+        
+        if db_path and os.path.exists(db_path):
+            return db_path
         
         # Try current working directory
         cwd_path = os.path.join(os.getcwd(), db_file)
@@ -189,6 +195,7 @@ class ConfigManager:
         """Set the database path in configuration."""
         self.config["db_path"] = db_path
         self.config["db_file"] = os.path.basename(db_path)
+        self.config["use_custom_db_path"] = True
         self.write_config()
 
 

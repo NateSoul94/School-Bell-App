@@ -734,7 +734,7 @@ def fetch_audio_directory_from_db(conn):
     """Fetch audio directory from database."""
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT directory FROM Settings WHERE id = 1")
+        cursor.execute("SELECT directory FROM Settings ORDER BY id ASC LIMIT 1")
         row = cursor.fetchone()
         return row[0] if row and row[0] else None
     except Exception as e:
@@ -747,7 +747,14 @@ def save_audio_directory_to_db(conn, directory):
     """Save audio directory to database."""
     try:
         cursor = conn.cursor()
-        cursor.execute("UPDATE Settings SET directory = ? WHERE id = 1", (directory,))
+        cursor.execute("SELECT id FROM Settings ORDER BY id ASC LIMIT 1")
+        row = cursor.fetchone()
+
+        if row:
+            cursor.execute("UPDATE Settings SET directory = ? WHERE id = ?", (directory, row[0]))
+        else:
+            cursor.execute("INSERT INTO Settings (directory) VALUES (?)", (directory,))
+
         conn.commit()
         return True
     except Exception as e:

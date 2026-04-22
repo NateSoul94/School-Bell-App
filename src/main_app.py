@@ -28,10 +28,11 @@ from functools import partial
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, 
     QTableWidgetItem, QPushButton, QSlider, QFrame, QLCDNumber, QProgressBar,
-    QHeaderView, QComboBox, QCheckBox, QSystemTrayIcon, QMenu, QSizePolicy
+    QHeaderView, QComboBox, QCheckBox, QSystemTrayIcon, QMenu, QSizePolicy,
+    QStyledItemDelegate
 )
 from PyQt6.QtGui import QIcon, QGuiApplication, QPixmap, QColor, QBrush
-from PyQt6.QtCore import QTimer, Qt, QEvent
+from PyQt6.QtCore import QTimer, Qt, QEvent, pyqtSignal
 
 # Import our modular components
 from config import (
@@ -61,6 +62,104 @@ from ui_components import (
     show_info_message, show_error_message, show_warning_message, show_question_dialog,
     get_text_input, get_integer_input, select_file, select_directory, select_font
 )
+
+
+class CheckableAudioComboBox(QComboBox):
+    """A combo box with checkable items for multi-select audio assignment."""
+
+    popupClosed = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setEditable(True)
+        self.lineEdit().setReadOnly(True)
+        self.lineEdit().setPlaceholderText("Select audio files")
+        self.view().viewport().installEventFilter(self)
+
+    def add_checkable_item(self, text, checked=False):
+        self.addItem(text)
+        item = self.model().item(self.count() - 1, 0)
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
+        item.setData(
+            Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked,
+            Qt.ItemDataRole.CheckStateRole
+        )
+
+    def checked_items(self):
+        selected = []
+        for i in range(self.count()):
+            item = self.model().item(i, 0)
+            if item and item.checkState() == Qt.CheckState.Checked:
+                selected.append(item.text())
+        return selected
+
+    def set_checked_items(self, selected_items):
+        selected_set = {name.strip() for name in selected_items if name and name.strip()}
+        for i in range(self.count()):
+            item = self.model().item(i, 0)
+            if not item:
+                continue
+            item.setCheckState(
+                Qt.CheckState.Checked if item.text() in selected_set else Qt.CheckState.Unchecked
+            )
+        self._update_display_text()
+
+    def eventFilter(self, obj, event):
+        if obj == self.view().viewport() and event.type() == QEvent.Type.MouseButtonRelease:
+            index = self.view().indexAt(event.pos())
+            if index.isValid():
+                item = self.model().itemFromIndex(index)
+                if item:
+                    new_state = Qt.CheckState.Unchecked if item.checkState() == Qt.CheckState.Checked else Qt.CheckState.Checked
+                    item.setCheckState(new_state)
+                    self._update_display_text()
+            return True
+        return super().eventFilter(obj, event)
+
+    def hidePopup(self):
+        super().hidePopup()
+        self.popupClosed.emit()
+
+    def _update_display_text(self):
+        self.lineEdit().setText(','.join(self.checked_items()))
+
+
+class AudioFileComboDelegate(QStyledItemDelegate):
+    """Multi-select dropdown editor for audio file columns in the schedule table."""
+
+    def __init__(self, app, parent=None):
+        super().__init__(parent)
+        self.app = app
+
+    def createEditor(self, parent, option, index):
+        combo = CheckableAudioComboBox(parent)
+        for file_name in self.app.get_available_audio_files():
+            combo.add_checkable_item(file_name)
+
+        current_value = index.data(Qt.ItemDataRole.EditRole) or ""
+        selected = [f.strip() for f in current_value.split(',') if f.strip()]
+        combo.set_checked_items(selected)
+
+        combo.popupClosed.connect(lambda: self._commit_and_close_editor(combo))
+
+        # Open the popup immediately so one click behaves like a picker.
+        QTimer.singleShot(0, combo.showPopup)
+        return combo
+
+    def setEditorData(self, editor, index):
+        current_value = index.data(Qt.ItemDataRole.EditRole) or ""
+        selected = [f.strip() for f in current_value.split(',') if f.strip()]
+        editor.set_checked_items(selected)
+
+    def setModelData(self, editor, model, index):
+        model.setData(index, ','.join(editor.checked_items()), Qt.ItemDataRole.EditRole)
+
+    def updateEditorGeometry(self, editor, option, index):
+        editor.setGeometry(option.rect)
+
+    def _commit_and_close_editor(self, editor):
+        self.commitData.emit(editor)
+        self.closeEditor.emit(editor, QStyledItemDelegate.EndEditHint.NoHint)
 
 
 class SchoolBellApp(QMainWindow):
@@ -264,7 +363,7 @@ class SchoolBellApp(QMainWindow):
         self.main_layout.addWidget(self.credit_label)
         
         # Toggle view button
-        self.toggle_view_button = QPushButton("Show Schedule", self)
+        self.toggle_view_button = QPushButton("Show Days", self)
         self.toggle_view_button.clicked.connect(self.toggle_days_schedule_view)
         self.main_layout.addWidget(self.toggle_view_button)
     
@@ -278,10 +377,16 @@ class SchoolBellApp(QMainWindow):
         self.table.horizontalHeader().setStretchLastSection(True)
         for i in range(6):
             self.table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
+
+        # Use dropdown editors for audio columns.
+        self.audio_combo_delegate = AudioFileComboDelegate(self, self.table)
+        self.table.setItemDelegateForColumn(3, self.audio_combo_delegate)
+        self.table.setItemDelegateForColumn(4, self.audio_combo_delegate)
         
         self.table.itemChanged.connect(self.handle_item_changed)
         self.table.cellClicked.connect(self.handle_cell_clicked)
-        self.table.setVisible(False)
+        self.table.cellDoubleClicked.connect(self.handle_cell_double_clicked)
+        self.table.setVisible(True)
         self.main_layout.addWidget(self.table)
         
         # Days table
@@ -290,6 +395,7 @@ class SchoolBellApp(QMainWindow):
         self.days_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.days_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.days_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.days_table.setVisible(False)
         self.main_layout.addWidget(self.days_table)
     
     def _setup_system_tray(self):
@@ -959,7 +1065,14 @@ class SchoolBellApp(QMainWindow):
     def set_default_audio_directory(self):
         """Set the default audio directory."""
         try:
-            default_dir = os.path.join(os.getenv('APPDATA', ''), 'Ali AHK Qasem', 'SchoolBellApp', 'audio_files')
+            default_dir = os.path.join(
+                os.path.expanduser('~'),
+                'AppData',
+                'Roaming',
+                'Ali AHK Qasem',
+                'SchoolBellApp',
+                'audio_files'
+            )
             os.makedirs(default_dir, exist_ok=True)
             
             if self.audio_manager.set_audio_directory(default_dir):
@@ -1344,7 +1457,9 @@ class SchoolBellApp(QMainWindow):
             
             # Update button text based on current view
             if hasattr(self, 'toggle_view_button') and self.toggle_view_button:
-                if self.table.isVisible():
+                # Use hidden state instead of isVisible so startup text is correct
+                # even before the main window itself is shown.
+                if not self.table.isHidden():
                     self.toggle_view_button.setText(translation.get("Show Days Button", "Show Days"))
                 else:
                     self.toggle_view_button.setText(translation.get("Show Schedule Button", "Show Schedule"))
@@ -1521,8 +1636,47 @@ class SchoolBellApp(QMainWindow):
                     if self.current_preset:
                         period_name = self.current_schedule[row].get("period", "")
                         update_schedule_in_db(self.current_preset, period_name, field, new_time)
+            elif column in [3, 4]:  # Audio start/end files
+                item = self.table.item(row, column)
+                if item:
+                    self.table.editItem(item)
         except Exception as e:
             logging.error(f"Error handling cell click: {e}")
+
+    def handle_cell_double_clicked(self, row, column):
+        """Open file picker for audio cells on double click."""
+        try:
+            self.selected_row = row
+            self.sync_selected_row_color()
+
+            if column == 3:
+                self.browse_file(row, "audio_start", replace_existing=True)
+            elif column == 4:
+                self.browse_file(row, "audio_end", replace_existing=True)
+        except Exception as e:
+            logging.error(f"Error handling cell double click: {e}")
+
+    def get_available_audio_files(self):
+        """Return available audio file names from configured audio directory."""
+        try:
+            directory = fetch_audio_directory_from_db()
+            if directory and os.path.isdir(directory):
+                self.audio_manager.set_audio_directory(directory)
+            else:
+                directory = self.audio_manager.get_audio_directory()
+
+            if not directory or not os.path.isdir(directory):
+                return []
+
+            audio_extensions = (".mp3", ".wav")
+            files = [
+                name for name in os.listdir(directory)
+                if os.path.isfile(os.path.join(directory, name)) and name.lower().endswith(audio_extensions)
+            ]
+            return sorted(files, key=str.lower)
+        except Exception as e:
+            logging.error(f"Error getting available audio files: {e}")
+            return []
     
     def handle_item_changed(self, item):
         """Handle table item changes."""
@@ -1783,14 +1937,22 @@ class SchoolBellApp(QMainWindow):
         if self.selected_row is not None:
             self.browse_file(self.selected_row, "audio_end")
     
-    def browse_file(self, row, audio_type):
+    def browse_file(self, row, audio_type, replace_existing=False):
         """Browse for audio file and add to schedule."""
         try:
             from PyQt6.QtWidgets import QFileDialog
             import os
             
-            # Get audio directory
-            directory = self.audio_manager.audio_dir if hasattr(self.audio_manager, 'audio_dir') and self.audio_manager.audio_dir else os.path.join(os.getenv('APPDATA', ''), 'Ali AHK Qasem', 'SchoolBellApp', 'audio_files')
+            # Always prefer the directory saved in Settings.
+            directory = fetch_audio_directory_from_db()
+            if directory and os.path.isdir(directory):
+                self.audio_manager.set_audio_directory(directory)
+            else:
+                directory = self.audio_manager.get_audio_directory()
+
+            if not directory or not os.path.isdir(directory):
+                show_warning_message("Audio directory is not set or does not exist.")
+                return
             
             file_name, _ = QFileDialog.getOpenFileName(self, "Select Audio File", directory, "Audio Files (*.mp3 *.wav)")
             if file_name:
@@ -1805,7 +1967,9 @@ class SchoolBellApp(QMainWindow):
                 cell = self.table.item(row, column)
                 current_text = cell.text() if cell else ""
                 
-                if current_text.strip():
+                if replace_existing:
+                    updated_text = display_name
+                elif current_text.strip():
                     updated_text = f"{current_text},{display_name}"
                 else:
                     updated_text = display_name

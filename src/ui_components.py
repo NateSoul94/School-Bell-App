@@ -55,8 +55,6 @@ class TranslationManager:
                 "Set Default Directory": "Set Default Directory",
                 "Play Start": "Play Start",
                 "Play End": "Play End",
-                "Choose Start": "Choose Start",
-                "Choose End": "Choose End",
                 "Remove All Audio": "Remove All Audio",
                 "Presets": "&Presets",
                 "Choose Preset:": "Choose Preset:",
@@ -102,8 +100,6 @@ class TranslationManager:
                 "Set Default Directory": "تعيين مجلد ملفات الصوت الافتراضي",
                 "Play Start": "تشغيل البداية",
                 "Play End": "تشغيل النهاية",
-                "Choose Start": "اختيار البداية",
-                "Choose End": "اختيار النهاية",
                 "Remove All Audio": "إزالة جميع الملفات الصوتية",
                 "Presets": "جدول الحصص",
                 "Choose Preset:": "اختر جدول الحصص:",
@@ -256,16 +252,6 @@ class MenuBar(QMenuBar):
         play_end_action = QAction(translation["Play End"], self)
         play_end_action.triggered.connect(self._safe_call('play_selected_end_audio'))
         self.audio_menu.addAction(play_end_action)
-        
-        self.audio_menu.addSeparator()
-        
-        browse_start_action = QAction(translation["Choose Start"], self)
-        browse_start_action.triggered.connect(self._safe_call('browse_selected_start_audio'))
-        self.audio_menu.addAction(browse_start_action)
-        
-        browse_end_action = QAction(translation["Choose End"], self)
-        browse_end_action.triggered.connect(self._safe_call('browse_selected_end_audio'))
-        self.audio_menu.addAction(browse_end_action)
         
         self.audio_menu.addSeparator()
         
@@ -530,7 +516,7 @@ class MenuBar(QMenuBar):
             if self.audio_menu:
                 actions = self.audio_menu.actions()
                 action_keys = ["Stop Audio", "Set Directory", "Set Default Directory", 
-                              "Play Start", "Play End", "Choose Start", "Choose End", "Remove All Audio"]
+                              "Play Start", "Play End", "Remove All Audio"]
                 action_index = 0
                 for action in actions:
                     if not action.isSeparator() and action_index < len(action_keys):
@@ -825,7 +811,6 @@ class HelpWindow(QMainWindow):
             <li><b>Set Directory:</b> Choose folder containing audio files</li>
             <li><b>Set Default Directory:</b> Use the default audio folder</li>
             <li><b>Play Start/End:</b> Test audio for selected period</li>
-            <li><b>Choose Start/End:</b> Select audio files for period</li>
             <li><b>Remove All Audio:</b> Clear all audio assignments</li>
         </ul>
         
