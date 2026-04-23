@@ -156,6 +156,7 @@ def launch_application():
         from PyQt6.QtWidgets import QApplication
         from PyQt6.QtCore import Qt
         from src.main_app import SchoolBellApp
+        from src.database import fetch_window_from_db
         from src.logging_system import update_app_status, log_memory_usage
         
         logging.info("Creating Qt application...")
@@ -177,7 +178,11 @@ def launch_application():
         
         # Create and show main window
         main_window = SchoolBellApp()
-        main_window.show()
+        saved_window_mode = fetch_window_from_db()
+        if saved_window_mode == "normal":
+            main_window.show()
+        else:
+            main_window.showMaximized()
         
         logging.info("Application launched successfully")
         update_app_status('RUNNING', 'Application fully operational')
