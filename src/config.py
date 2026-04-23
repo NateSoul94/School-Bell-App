@@ -25,7 +25,7 @@ def get_base_directory():
 
 BASE_DIR = get_base_directory()
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
-AUDIO_DIR = os.path.join(BASE_DIR, "assets", "audio_files")
+AUDIO_DIR = os.path.join(BASE_DIR, "audio_files")
 ICON_PATH = os.path.join(BASE_DIR, "assets", "icons", "icon.ico")
 TRAY_ICON_PATH = os.path.join(BASE_DIR, "assets", "icons", "icon.png")
 MOE_PATH = os.path.join(BASE_DIR, "assets", "images", "MOE.png")
