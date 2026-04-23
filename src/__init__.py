@@ -27,10 +27,10 @@ Components:
 - main_app: Main application class
 
 Author: Ali Qasem
-Version: 2.0.0
+Version: 2.3.0
 """
 
-__version__ = "2.0.0"
+__version__ = "2.3.0"
 __author__ = "Ali Qasem"
 
 # Core modules
