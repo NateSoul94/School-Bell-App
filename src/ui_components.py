@@ -34,7 +34,7 @@ from config import (
 )
 from database import (
     fetch_presets_from_db, save_language_to_db, save_theme_to_db,
-    fetch_theme_from_db, save_font_settings_to_db, fetch_font_settings_from_db,
+    fetch_theme_from_db, fetch_window_from_db, save_font_settings_to_db, fetch_font_settings_from_db,
     fetch_colors_from_db
 )
 
@@ -74,6 +74,9 @@ class TranslationManager:
                 "Default Font": "Default Font",
                 "Change Digital Height": "Change Digital Height",
                 "Choose Theme:": "Choose Theme:",
+                "Window Type:": "Window Type:",
+                "Normal": "normal",
+                "Maximized": "maximized",
                 "Choose Language:": "Choose Language:",
                 "About": "&About",
                 "Help": "Help",
@@ -119,6 +122,9 @@ class TranslationManager:
                 "Default Font": "الخط الافتراضي",
                 "Change Digital Height": "تغيير ارتفاع الساعة الرقمية",
                 "Choose Theme:": "اختر اللون:",
+                "Window Type:": "نوع النافذة:",
+                "Normal": "normal",
+                "Maximized": "maximized",
                 "Choose Language:": "اختر اللغة:",
                 "About": "حول",
                 "Help": "مساعدة",
@@ -157,9 +163,11 @@ class MenuBar(QMenuBar):
         # Initialize UI references
         self.preset_combo = None
         self.theme_combo = None
+        self.window_type_combo = None
         self.language_combo = None
         self.row_color_combo = None
         self.row_color_label = None
+        self.window_type_label = None
         self.database_label = None
         self.lock_action = None
         
@@ -390,6 +398,30 @@ class MenuBar(QMenuBar):
         theme_widget.setLayout(theme_layout)
         theme_action.setDefaultWidget(theme_widget)
         self.view_menu.addAction(theme_action)
+
+        # Window type selection
+        window_action = QWidgetAction(self)
+        window_widget = QWidget(self)
+        window_layout = QVBoxLayout(window_widget)
+
+        self.window_type_label = QLabel(translation.get("Window Type:", "Window Type:"), self)
+        self.window_type_combo = QComboBox(self)
+        self.window_type_combo.addItem(translation.get("Normal", "normal"), "normal")
+        self.window_type_combo.addItem(translation.get("Maximized", "maximized"), "maximized")
+        self.window_type_combo.currentTextChanged.connect(self._safe_call('set_window_type', pass_args=True))
+
+        try:
+            current_window_mode = fetch_window_from_db()
+            index = self.window_type_combo.findData(current_window_mode)
+            self.window_type_combo.setCurrentIndex(index if index >= 0 else 1)
+        except Exception as e:
+            logging.error(f"Error setting current window mode: {e}")
+
+        window_layout.addWidget(self.window_type_label)
+        window_layout.addWidget(self.window_type_combo)
+        window_widget.setLayout(window_layout)
+        window_action.setDefaultWidget(window_widget)
+        self.view_menu.addAction(window_action)
         
         # Language selection
         language_action = QWidgetAction(self)
@@ -592,8 +624,20 @@ class MenuBar(QMenuBar):
                             for label in theme_labels:
                                 if "Theme" in label.text() or "اللون" in label.text():
                                     label.setText(translation.get("Choose Theme:", "Choose Theme:"))
+                                elif "Window Type" in label.text() or "نوع النافذة" in label.text():
+                                    label.setText(translation.get("Window Type:", "Window Type:"))
                                 elif "Language" in label.text() or "اللغة" in label.text():
                                     label.setText(translation.get("Choose Language:", "Choose Language:"))
+
+            if self.window_type_combo is not None:
+                selected_mode = self.window_type_combo.currentData() or "maximized"
+                self.window_type_combo.blockSignals(True)
+                self.window_type_combo.clear()
+                self.window_type_combo.addItem(translation.get("Normal", "normal"), "normal")
+                self.window_type_combo.addItem(translation.get("Maximized", "maximized"), "maximized")
+                selected_index = self.window_type_combo.findData(selected_mode)
+                self.window_type_combo.setCurrentIndex(selected_index if selected_index >= 0 else 1)
+                self.window_type_combo.blockSignals(False)
             
             # Update preset selection label
             if self.presets_menu:
@@ -750,7 +794,7 @@ class AboutWindow(QMainWindow):
         <p>This application is designed to manage school bell schedules.</p>
         <br>
         <p style="direction: rtl; text-align: right;">
-        <br>Codded by: Ali Qasem
+        <br>Coded by: Ali Qasem
         </p>
         """
         

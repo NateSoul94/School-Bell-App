@@ -117,6 +117,7 @@ def ensure_tables_exist():
                 id INTEGER PRIMARY KEY DEFAULT 1,
                 language TEXT DEFAULT 'English',
                 theme TEXT DEFAULT 'Default',
+                window TEXT DEFAULT 'maximized',
                 font TEXT DEFAULT 'Segoe UI',
                 font_weight TEXT DEFAULT 'normal',
                 font_size INTEGER DEFAULT 14,
@@ -156,6 +157,7 @@ def ensure_tables_exist():
         ensure_days_preset_column()
         ensure_schedule_color_column()
         ensure_colors_table()
+        ensure_window_column()
 
         logging.info("Database tables verified and initialized")
         return True
@@ -286,6 +288,31 @@ def ensure_colors_table():
         return True
     except Exception as e:
         logging.error(f"Error ensuring Colors table: {e}")
+        return False
+
+
+def ensure_window_column():
+    """Ensure the Settings table has a window column."""
+    connection_string = get_connection_string()
+    if not connection_string:
+        return False
+
+    try:
+        conn = sqlite3.connect(connection_string)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(Settings)")
+        columns = {row[1] for row in cursor.fetchall()}
+
+        if columns and "window" not in columns:
+            cursor.execute("ALTER TABLE Settings ADD COLUMN window TEXT DEFAULT 'maximized'")
+            cursor.execute("UPDATE Settings SET window = 'maximized' WHERE window IS NULL OR TRIM(window) = ''")
+            conn.commit()
+            logging.info("Added window column to Settings table")
+
+        conn.close()
+        return True
+    except Exception as e:
+        logging.error(f"Error ensuring window column: {e}")
         return False
     finally:
         if conn:
@@ -670,6 +697,41 @@ def save_theme_to_db(conn, theme):
 
 
 @database_operation
+def fetch_window_from_db(conn):
+    """Fetch window mode setting from database."""
+    try:
+        ensure_window_column()
+        cursor = conn.cursor()
+        cursor.execute("SELECT window FROM Settings WHERE id = 1")
+        row = cursor.fetchone()
+        window_mode = (row[0] or "").strip().lower() if row and row[0] else "maximized"
+        if window_mode not in ("normal", "maximized"):
+            return "maximized"
+        return window_mode
+    except Exception as e:
+        logging.error(f"Error fetching window mode from database: {e}")
+        return "maximized"
+
+
+@database_operation
+def save_window_to_db(conn, window_mode):
+    """Save window mode setting to database."""
+    try:
+        ensure_window_column()
+        mode = (window_mode or "").strip().lower()
+        if mode not in ("normal", "maximized"):
+            mode = "maximized"
+
+        cursor = conn.cursor()
+        cursor.execute("UPDATE Settings SET window = ? WHERE id = 1", (mode,))
+        conn.commit()
+        return True
+    except Exception as e:
+        logging.error(f"Error saving window mode to database: {e}")
+        return False
+
+
+@database_operation
 def fetch_current_preset_from_db(conn):
     """Fetch current preset from database."""
     try:
@@ -959,9 +1021,19 @@ def get_database_info():
 
 def initialize_database():
     """Initialize database with proper schema and default data."""
-    if not test_database_connection():
-        logging.error("Cannot initialize database - no connection available")
+    connection_string = get_connection_string()
+    if not connection_string:
+        logging.error("Cannot initialize database - no database path available")
         return False
+
+    # Ensure parent directory exists so SQLite can create the DB on first run.
+    parent_dir = os.path.dirname(connection_string)
+    if parent_dir:
+        try:
+            os.makedirs(parent_dir, exist_ok=True)
+        except Exception as e:
+            logging.error(f"Cannot create database directory {parent_dir}: {e}")
+            return False
     
     try:
         success = ensure_tables_exist()
@@ -969,6 +1041,7 @@ def initialize_database():
             ensure_days_preset_column()
             ensure_schedule_color_column()
             ensure_colors_table()
+            ensure_window_column()
             logging.info("Database initialized successfully")
         return success
     except Exception as e:

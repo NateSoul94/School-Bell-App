@@ -16,20 +16,31 @@ import os
 import sys
 import json
 
-def get_base_directory():
-    """Get the application base directory."""
+def get_app_directory():
+    """Get the persistent application directory (where config/db live)."""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def get_resource_directory():
+    """Get the bundled resource directory (icons/images)."""
     if hasattr(sys, '_MEIPASS'):
         return sys._MEIPASS
-    else:
-        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-BASE_DIR = get_base_directory()
-CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
-AUDIO_DIR = os.path.join(BASE_DIR, "audio_files")
-ICON_PATH = os.path.join(BASE_DIR, "assets", "icons", "icon.ico")
-TRAY_ICON_PATH = os.path.join(BASE_DIR, "assets", "icons", "icon.png")
-MOE_PATH = os.path.join(BASE_DIR, "assets", "images", "MOE.png")
-SCHOOL_LOGO_PATH = os.path.join(BASE_DIR, "assets", "images", "School.png")
+
+APP_DIR = get_app_directory()
+RESOURCE_DIR = get_resource_directory()
+BASE_DIR = APP_DIR
+CONFIG_FILE = os.path.join(APP_DIR, "config.json")
+AUDIO_DIR = os.path.join(APP_DIR, "audio_files")
+ICON_PATH = os.path.join(RESOURCE_DIR, "assets", "icons", "icon.ico")
+TRAY_ICON_PATH = os.path.join(RESOURCE_DIR, "assets", "icons", "icon.png")
+MOE_PATH = os.path.join(RESOURCE_DIR, "assets", "images", "MOE.png")
+SCHOOL_LOGO_PATH = os.path.join(RESOURCE_DIR, "assets", "images", "School.png")
 
 APP_NAME = "School Bell App"
 APP_VERSION = "2.0"
@@ -43,7 +54,7 @@ DEFAULT_CONFIG = {
 
 SUPPORTED_LANGUAGES = ["English", "Arabic"]
 
-SUPPORTED_THEMES = ["Default", "Dark", "Light", "Sky Blue"]
+SUPPORTED_THEMES = ["Default", "Dark", "Light", "Sky Blue", "Navy Blue"]
 
 SUPPORTED_AUDIO_FORMATS = ['.mp3', '.wav', '.ogg']
 
@@ -52,7 +63,7 @@ DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
 DATABASE_TABLES = {
     'Schedule': ['Period', 'Start_Time', 'End_Time', 'Audio_Start', 'Audio_End', 'Volume', 'Preset', 'Color'],
     'Presets': ['name'],
-    'Settings': ['id', 'language', 'theme', 'font', 'font_weight', 'font_size', 'height', 
+    'Settings': ['id', 'language', 'theme', 'window', 'font', 'font_weight', 'font_size', 'height', 
                 'directory', 'preset', 'active', 'password', 'lock'],
     'days': ['id', 'day_name', 'active', 'preset'],
     'Colors': ['Name', 'Hex']
@@ -102,7 +113,7 @@ class ConfigManager:
         if not os.path.exists(self.config_file):
             # Set dynamic defaults
             default_config = DEFAULT_CONFIG.copy()
-            default_config["db_path"] = os.path.join(BASE_DIR, default_config["db_file"])
+            default_config["db_path"] = os.path.join(APP_DIR, default_config["db_file"])
             
             self.write_config(default_config)
             return default_config
@@ -176,10 +187,13 @@ class ConfigManager:
         if use_custom_db_path and db_path and os.path.exists(db_path):
             return db_path
 
-        # Otherwise prefer the local app database in the current base directory.
-        base_path = os.path.join(BASE_DIR, db_file)
+        # Otherwise prefer the local app database in the app directory.
+        base_path = os.path.join(APP_DIR, db_file)
         if os.path.exists(base_path):
             return base_path
+
+        if use_custom_db_path and db_path:
+            return db_path
         
         if db_path and os.path.exists(db_path):
             return db_path
@@ -188,8 +202,9 @@ class ConfigManager:
         cwd_path = os.path.join(os.getcwd(), db_file)
         if os.path.exists(cwd_path):
             return cwd_path
-        
-        return None
+
+        # Return the default app-local path even if file does not exist yet.
+        return base_path
     
     def set_database_path(self, db_path):
         """Set the database path in configuration."""

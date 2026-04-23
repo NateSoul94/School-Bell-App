@@ -31,7 +31,7 @@ from PyQt6.QtWidgets import (
     QHeaderView, QComboBox, QCheckBox, QSystemTrayIcon, QMenu, QSizePolicy,
     QStyledItemDelegate
 )
-from PyQt6.QtGui import QIcon, QGuiApplication, QPixmap, QColor, QBrush
+from PyQt6.QtGui import QIcon, QGuiApplication, QPixmap, QColor, QBrush, QPalette
 from PyQt6.QtCore import QTimer, Qt, QEvent, pyqtSignal
 
 # Import our modular components
@@ -43,6 +43,7 @@ from database import (
     fetch_presets_from_db, fetch_schedule_from_db, save_current_preset_to_db,
     fetch_current_preset_from_db, fetch_active_status_from_db, update_active_status_in_db,
     fetch_language_from_db, save_language_to_db, fetch_theme_from_db, save_theme_to_db,
+    save_window_to_db,
     fetch_font_settings_from_db, save_font_settings_to_db, fetch_height_from_db, save_height_to_db,
     fetch_audio_directory_from_db, save_audio_directory_to_db, fetch_lock_state_from_db,
     update_lock_state_in_db, fetch_password_from_db, save_password_to_db,
@@ -357,7 +358,7 @@ class SchoolBellApp(QMainWindow):
         self.main_layout.addWidget(self.progress_bar)
         
         # Credit label
-        self.credit_label = QLabel("Codded by: Ali Qasem", self)
+        self.credit_label = QLabel("Coded by: Ali Qasem", self)
         self.credit_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.credit_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.main_layout.addWidget(self.credit_label)
@@ -1215,192 +1216,139 @@ class SchoolBellApp(QMainWindow):
     def apply_theme(self, theme_name):
         """Apply the specified theme."""
         try:
+            from PyQt6.QtWidgets import QApplication
+
             font_family, font_weight, font_size = fetch_font_settings_from_db()
-            
-            if theme_name.lower() == "default":
-                stylesheet = f"""
-                    * {{
-                        font-size: {font_size}px;
-                        font-family: {font_family};
-                        font-weight: {font_weight};
-                    }}
-                """
-            elif theme_name.lower() == "dark":
-                stylesheet = f"""
-                    * {{
-                        font-size: {font_size}px;
-                        font-family: {font_family};
-                        font-weight: {font_weight};
-                    }}
-                    QMainWindow {{
-                        background-color: #2E2E2E;
-                    }}
-                    QLabel, QTableWidget, QPushButton, QComboBox, QCheckBox, QTableWidgetItem {{
-                        color: white;
-                    }}
-                    QTableWidget {{
-                        background-color: #424242;
-                        gridline-color: white;
-                    }}
-                    QPushButton {{
-                        background-color: #616161;
-                        border: 1px solid white;
-                    }}
-                    QHeaderView::section {{
-                        background-color: #616161;
-                        color: white;
-                    }}
-                    QMenuBar {{
-                        background-color: #616161;
-                        color: white;
-                    }}
-                    QMenuBar::item {{
-                        background-color: #616161;
-                        color: white;
-                    }}
-                    QMenuBar::item:selected {{
-                        background-color: #757575;
-                    }}
-                    QMenu {{
-                        background-color: #2E2E2E;
-                        color: white;
-                        border: 1px solid white;
-                    }}
-                    QMenu::item:selected {{
-                        background-color: #757575;
-                    }}
-                    QComboBox {{
-                        background-color: #616161;
-                        color: white;
-                        border: 1px solid white;
-                    }}
-                    QComboBox QAbstractItemView {{
-                        background-color: #616161;
-                        color: white;
-                        border: 1px solid white;
-                    }}
-                """
-            elif theme_name.lower() == "light":
-                stylesheet = f"""
-                    * {{
-                        font-size: {font_size}px;
-                        font-family: {font_family};
-                        font-weight: {font_weight};
-                    }}
-                    QMainWindow {{
-                        background-color: #FFFFFF;
-                    }}
-                    QLabel, QTableWidget, QPushButton, QComboBox, QCheckBox, QTableWidgetItem {{
-                        color: black;
-                    }}
-                    QTableWidget {{
-                        background-color: #F0F0F0;
-                        gridline-color: black;
-                    }}
-                    QPushButton {{
-                        background-color: #D3D3D3;
-                        border: 1px solid black;
-                    }}
-                    QHeaderView::section {{
-                        background-color: #D3D3D3;
-                        color: black;
-                    }}
-                    QMenuBar {{
-                        background-color: #D3D3D3;
-                        color: black;
-                    }}
-                    QMenuBar::item {{
-                        background-color: #D3D3D3;
-                        color: black;
-                    }}
-                    QMenuBar::item:selected {{
-                        background-color: #BEBEBE;
-                    }}
-                    QMenu {{
-                        background-color: #FFFFFF;
-                        color: black;
-                        border: 1px solid black;
-                    }}
-                    QMenu::item:selected {{
-                        background-color: #BEBEBE;
-                    }}
-                    QComboBox {{
-                        background-color: #D3D3D3;
-                        color: black;
-                        border: 1px solid black;
-                    }}
-                    QComboBox QAbstractItemView {{
-                        background-color: #D3D3D3;
-                        color: black;
-                        border: 1px solid black;
-                    }}
-                """
-            elif theme_name.lower() == "sky blue":
-                stylesheet = f"""
-                    * {{
-                        font-size: {font_size}px;
-                        font-family: {font_family};
-                        font-weight: {font_weight};
-                    }}
-                    QMainWindow {{
-                        background-color: #87CEEB;
-                    }}
-                    QLabel, QTableWidget, QPushButton, QComboBox, QCheckBox, QTableWidgetItem {{
-                        color: black;
-                    }}
-                    QTableWidget {{
-                        background-color: #E0FFFF;
-                        gridline-color: black;
-                    }}
-                    QPushButton {{
-                        background-color: #B0E0E6;
-                        border: 1px solid black;
-                    }}
-                    QHeaderView::section {{
-                        background-color: #B0E0E6;
-                        color: black;
-                    }}
-                    QMenuBar {{
-                        background-color: #B0E0E6;
-                        color: black;
-                    }}
-                    QMenuBar::item {{
-                        background-color: #B0E0E6;
-                        color: black;
-                    }}
-                    QMenuBar::item:selected {{
-                        background-color: #ADD8E6;
-                    }}
-                    QMenu {{
-                        background-color: #F0F8FF;
-                        color: black;
-                        border: 1px solid black;
-                    }}
-                    QMenu::item:selected {{
-                        background-color: #ADD8E6;
-                    }}
-                    QComboBox {{
-                        background-color: #B0E0E6;
-                        color: black;
-                        border: 1px solid black;
-                    }}
-                    QComboBox QAbstractItemView {{
-                        background-color: #B0E0E6;
-                        color: black;
-                        border: 1px solid black;
-                    }}
-                """
+
+            app = QApplication.instance()
+            if app is None:
+                return
+
+            theme_key = (theme_name or "Default").strip().lower()
+            if not hasattr(self, '_original_system_palette'):
+                # Capture the startup palette once so Default can always restore it.
+                self._original_system_palette = QPalette(app.palette())
+
+            if theme_key == "default":
+                # Restore the original app palette captured at startup.
+                app.setPalette(QPalette(self._original_system_palette))
+            elif theme_key == "dark":
+                dark_palette = QPalette()
+                dark_palette.setColor(QPalette.ColorRole.Window, QColor("#1e1e1e"))
+                dark_palette.setColor(QPalette.ColorRole.WindowText, QColor("#FFFFFF"))
+                dark_palette.setColor(QPalette.ColorRole.Base, QColor("#232323"))
+                dark_palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#2E2E2E"))
+                dark_palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#FFFFFF"))
+                dark_palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#FFFFFF"))
+                dark_palette.setColor(QPalette.ColorRole.Text, QColor("#FFFFFF"))
+                dark_palette.setColor(QPalette.ColorRole.Button, QColor("#3C3C3C"))
+                dark_palette.setColor(QPalette.ColorRole.ButtonText, QColor("#FFFFFF"))
+                dark_palette.setColor(QPalette.ColorRole.BrightText, QColor("#FF5555"))
+                dark_palette.setColor(QPalette.ColorRole.Link, QColor("#2A82DA"))
+                dark_palette.setColor(QPalette.ColorRole.Highlight, QColor("#2A82DA"))
+                dark_palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#FFFFFF"))
+                dark_palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor("#7A7A7A"))
+                dark_palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor("#7A7A7A"))
+                dark_palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor("#7A7A7A"))
+                app.setPalette(dark_palette)
+            elif theme_key == "light":
+                light_palette = QPalette()
+                light_palette.setColor(QPalette.ColorRole.Window, QColor("#e5e5e5"))
+                light_palette.setColor(QPalette.ColorRole.WindowText, QColor("#000000"))
+                light_palette.setColor(QPalette.ColorRole.Base, QColor("#FFFFFF"))
+                light_palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#F5F5F5"))
+                light_palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#FFFFFF"))
+                light_palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#000000"))
+                light_palette.setColor(QPalette.ColorRole.Text, QColor("#000000"))
+                light_palette.setColor(QPalette.ColorRole.Button, QColor("#E9E9E9"))
+                light_palette.setColor(QPalette.ColorRole.ButtonText, QColor("#000000"))
+                light_palette.setColor(QPalette.ColorRole.BrightText, QColor("#D00000"))
+                light_palette.setColor(QPalette.ColorRole.Link, QColor("#0066CC"))
+                light_palette.setColor(QPalette.ColorRole.Highlight, QColor("#0078D7"))
+                light_palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#FFFFFF"))
+                light_palette.setColor(QPalette.ColorRole.PlaceholderText, QColor("#666666"))
+                light_palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor("#777777"))
+                light_palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor("#777777"))
+                light_palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor("#777777"))
+                app.setPalette(light_palette)
+            elif theme_key == "sky blue":
+                sky_palette = QPalette()
+                sky_palette.setColor(QPalette.ColorRole.Window, QColor("#87CEEB"))
+                sky_palette.setColor(QPalette.ColorRole.WindowText, QColor("#000000"))
+                sky_palette.setColor(QPalette.ColorRole.Base, QColor("#EAF7FF"))
+                sky_palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#DFF2FF"))
+                sky_palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#FFFFFF"))
+                sky_palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#000000"))
+                sky_palette.setColor(QPalette.ColorRole.Text, QColor("#000000"))
+                sky_palette.setColor(QPalette.ColorRole.Button, QColor("#B7E4F7"))
+                sky_palette.setColor(QPalette.ColorRole.ButtonText, QColor("#000000"))
+                sky_palette.setColor(QPalette.ColorRole.BrightText, QColor("#CC0000"))
+                sky_palette.setColor(QPalette.ColorRole.Link, QColor("#005B96"))
+                sky_palette.setColor(QPalette.ColorRole.Highlight, QColor("#1F7FBF"))
+                sky_palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#FFFFFF"))
+                sky_palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor("#555555"))
+                sky_palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor("#555555"))
+                sky_palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor("#555555"))
+                app.setPalette(sky_palette)
+            elif theme_key == "navy blue":
+                navy_palette = QPalette()
+                navy_palette.setColor(QPalette.ColorRole.Window, QColor("#14213d"))
+                navy_palette.setColor(QPalette.ColorRole.WindowText, QColor("#F8FAFF"))
+                navy_palette.setColor(QPalette.ColorRole.Base, QColor("#0F1B33"))
+                navy_palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#182B4D"))
+                navy_palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#F8FAFF"))
+                navy_palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#0F1B33"))
+                navy_palette.setColor(QPalette.ColorRole.Text, QColor("#F8FAFF"))
+                navy_palette.setColor(QPalette.ColorRole.Button, QColor("#1B2F57"))
+                navy_palette.setColor(QPalette.ColorRole.ButtonText, QColor("#F8FAFF"))
+                navy_palette.setColor(QPalette.ColorRole.BrightText, QColor("#FF6B6B"))
+                navy_palette.setColor(QPalette.ColorRole.Link, QColor("#6FB1FF"))
+                navy_palette.setColor(QPalette.ColorRole.Highlight, QColor("#2F80ED"))
+                navy_palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#FFFFFF"))
+                navy_palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor("#8A97AE"))
+                navy_palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor("#8A97AE"))
+                navy_palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor("#8A97AE"))
+                app.setPalette(navy_palette)
             else:
-                # Fallback to default theme for unknown themes
-                stylesheet = f"""
-                    * {{
-                        font-size: {font_size}px;
-                        font-family: {font_family};
-                        font-weight: {font_weight};
-                    }}
+                app.setPalette(app.style().standardPalette())
+
+            # Keep font settings independent of palette/theme choice.
+            base_font_style = (
+                f"* {{ font-size: {font_size}px; font-family: {font_family}; font-weight: {font_weight}; }}"
+                f"QMenuBar, QMenuBar::item, QMenu, QMenu::item {{ "
+                f"font-size: {font_size}px; font-family: {font_family}; font-weight: {font_weight}; }}"
+            )
+
+            if theme_key == "light":
+                # Some widgets render low-contrast text in light palette on certain systems.
+                # Force readable text color for menu/header-related controls only.
+                light_contrast_overrides = """
+                    QMenuBar, QMenuBar::item, QMenu, QMenu::item,
+                    QHeaderView::section, QComboBox, QComboBox QAbstractItemView,
+                    QPushButton {
+                        color: #000000;
+                    }
+                    QMenu::item:disabled, QMenuBar::item:disabled, QPushButton:disabled {
+                        color: #555555;
+                    }
                 """
-            
-            self.setStyleSheet(stylesheet)
+                self.setStyleSheet(base_font_style + light_contrast_overrides)
+            elif theme_key == "navy blue":
+                navy_contrast_overrides = """
+                    QMenuBar, QMenuBar::item, QMenu, QMenu::item,
+                    QHeaderView::section, QComboBox, QComboBox QAbstractItemView,
+                    QLabel, QTableWidget, QTableWidgetItem, QCheckBox, QPushButton {
+                        color: #F8FAFF;
+                    }
+                    QMenu::item:disabled, QMenuBar::item:disabled,
+                    QLabel:disabled, QPushButton:disabled {
+                        color: #8A97AE;
+                    }
+                """
+                self.setStyleSheet(base_font_style + navy_contrast_overrides)
+            else:
+                self.setStyleSheet(base_font_style)
+
             save_theme_to_db(theme_name)
             logging.info(f"Theme applied: {theme_name}")
             
@@ -1419,6 +1367,26 @@ class SchoolBellApp(QMainWindow):
                 logging.warning(f"Unsupported language: {language}")
         except Exception as e:
             logging.error(f"Error changing language: {e}")
+
+    def set_window_type(self, window_type):
+        """Set and persist the preferred launch window mode."""
+        try:
+            mode = (window_type or "").strip().lower()
+            if mode not in ("normal", "maximized"):
+                mode = "maximized"
+
+            if save_window_to_db(mode):
+                logging.info(f"Window mode preference saved: {mode}")
+
+                # Apply immediately so the choice is visible right away.
+                if mode == "normal":
+                    self.showNormal()
+                else:
+                    self.showMaximized()
+            else:
+                logging.error("Failed to save window mode preference")
+        except Exception as e:
+            logging.error(f"Error setting window type: {e}")
     
     def update_language_labels(self, language, translation):
         """Update UI labels with new language."""
@@ -1523,8 +1491,40 @@ class SchoolBellApp(QMainWindow):
     def apply_font_settings(self, font_family, font_weight, font_size):
         """Apply font settings to the application."""
         try:
+            from PyQt6.QtGui import QFont
+
             current_theme = fetch_theme_from_db()
             self.apply_theme(current_theme)  # This will use the new font settings
+
+            # Native menu rendering can ignore stylesheet font-size on some systems,
+            # so set menu fonts explicitly.
+            ui_font = QFont(font_family, int(font_size))
+            ui_font.setBold(str(font_weight).lower() == "bold")
+
+            if self.menu_bar:
+                self.menu_bar.setFont(ui_font)
+
+                menus = [
+                    self.menu_bar.file_menu,
+                    self.menu_bar.audio_menu,
+                    self.menu_bar.presets_menu,
+                    self.menu_bar.database_menu,
+                    self.menu_bar.tables_menu,
+                    self.menu_bar.view_menu,
+                    self.menu_bar.about_menu,
+                    self.menu_bar.lock_menu,
+                ]
+
+                for menu in menus:
+                    if not menu:
+                        continue
+                    menu.setFont(ui_font)
+                    for action in menu.actions():
+                        try:
+                            action.setFont(ui_font)
+                        except Exception:
+                            pass
+
             logging.info(f"Font settings applied: {font_family}, {font_weight}, {font_size}")
         except Exception as e:
             logging.error(f"Error applying font settings: {e}")
