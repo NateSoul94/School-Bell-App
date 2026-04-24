@@ -35,7 +35,7 @@ from config import (
 from database import (
     fetch_presets_from_db, save_language_to_db, save_theme_to_db,
     fetch_theme_from_db, fetch_window_from_db, save_font_settings_to_db, fetch_font_settings_from_db,
-    fetch_colors_from_db
+    fetch_colors_from_db, fetch_custom_theme_names_from_db
 )
 
 
@@ -74,6 +74,7 @@ class TranslationManager:
                 "Default Font": "Default Font",
                 "Change Digital Height": "Change Digital Height",
                 "Choose Theme:": "Choose Theme:",
+                "Custom Themes": "Custom Themes",
                 "Window Type:": "Window Type:",
                 "Normal": "normal",
                 "Maximized": "maximized",
@@ -122,6 +123,7 @@ class TranslationManager:
                 "Default Font": "الخط الافتراضي",
                 "Change Digital Height": "تغيير ارتفاع الساعة الرقمية",
                 "Choose Theme:": "اختر اللون:",
+                "Custom Themes": "السمات المخصصة",
                 "Window Type:": "نوع النافذة:",
                 "Normal": "normal",
                 "Maximized": "maximized",
@@ -170,6 +172,7 @@ class MenuBar(QMenuBar):
         self.window_type_label = None
         self.database_label = None
         self.lock_action = None
+        self.custom_themes_action = None
         
         # Menu references
         self.file_menu = None
@@ -381,7 +384,7 @@ class MenuBar(QMenuBar):
         
         theme_label = QLabel(translation["Choose Theme:"], self)
         self.theme_combo = QComboBox(self)
-        self.theme_combo.addItems(SUPPORTED_THEMES)
+        self.refresh_theme_options()
         self.theme_combo.currentTextChanged.connect(self._safe_call('apply_theme', pass_args=True))
         
         # Set current theme
@@ -398,6 +401,10 @@ class MenuBar(QMenuBar):
         theme_widget.setLayout(theme_layout)
         theme_action.setDefaultWidget(theme_widget)
         self.view_menu.addAction(theme_action)
+
+        self.custom_themes_action = QAction(translation.get("Custom Themes", "Custom Themes"), self)
+        self.custom_themes_action.triggered.connect(self._safe_call('open_custom_theme_editor'))
+        self.view_menu.addAction(self.custom_themes_action)
 
         # Window type selection
         window_action = QWidgetAction(self)
@@ -588,6 +595,9 @@ class MenuBar(QMenuBar):
                             action.setText(translation.get("Default Font", "Default Font"))
                         elif action_text == "Change Digital Height" or "Change Digital Height" in action_text:
                             action.setText(translation.get("Change Digital Height", "Change Digital Height"))
+
+            if self.custom_themes_action:
+                self.custom_themes_action.setText(translation.get("Custom Themes", "Custom Themes"))
             
             # Update tables menu actions
             if self.tables_menu:
@@ -705,6 +715,30 @@ class MenuBar(QMenuBar):
             
         except Exception as e:
             logging.error(f"Error refreshing presets: {e}")
+
+    def refresh_theme_options(self, selected_theme=None):
+        """Refresh theme combo options with built-in and custom themes."""
+        if self.theme_combo is None:
+            return
+
+        try:
+            current_theme = selected_theme or self.theme_combo.currentText() or fetch_theme_from_db()
+            custom_theme_names = fetch_custom_theme_names_from_db() or []
+
+            merged_themes = list(SUPPORTED_THEMES)
+            for custom_name in custom_theme_names:
+                if custom_name not in merged_themes:
+                    merged_themes.append(custom_name)
+
+            self.theme_combo.blockSignals(True)
+            self.theme_combo.clear()
+            self.theme_combo.addItems(merged_themes)
+
+            index = self.theme_combo.findText(current_theme)
+            self.theme_combo.setCurrentIndex(index if index >= 0 else 0)
+            self.theme_combo.blockSignals(False)
+        except Exception as e:
+            logging.error(f"Error refreshing theme options: {e}")
 
     def refresh_row_color_options(self, colors=None):
         """Refresh the row color combo box from the Colors table."""

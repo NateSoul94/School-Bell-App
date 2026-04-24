@@ -66,7 +66,14 @@ DATABASE_TABLES = {
     'Settings': ['id', 'language', 'theme', 'window', 'font', 'font_weight', 'font_size', 'height', 
                 'directory', 'preset', 'active', 'password', 'lock'],
     'days': ['id', 'day_name', 'active', 'preset'],
-    'Colors': ['Name', 'Hex']
+    'Colors': ['Name', 'Hex'],
+    'Themes': [
+        'id', 'name', 'Window', 'WindowText', 'Base', 'AlternateBase',
+        'ToolTipBase', 'ToolTipText', 'Text', 'MenuText', 'Button', 'ButtonText',
+        'BrightText', 'Link', 'Highlight', 'HighlightedText',
+        'PlaceholderText', 'DisabledText', 'DisabledButtonText',
+        'DisabledWindowText'
+    ]
 }
 
 LOG_CONFIG = {

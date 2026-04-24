@@ -158,6 +158,7 @@ def ensure_tables_exist():
         ensure_schedule_color_column()
         ensure_colors_table()
         ensure_window_column()
+        ensure_themes_table()
 
         logging.info("Database tables verified and initialized")
         return True
@@ -313,6 +314,156 @@ def ensure_window_column():
         return True
     except Exception as e:
         logging.error(f"Error ensuring window column: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def ensure_themes_table():
+    """Ensure custom Themes table exists as one row per theme."""
+    connection_string = get_connection_string()
+    if not connection_string:
+        return False
+
+    theme_color_columns = [
+        "Window",
+        "WindowText",
+        "Base",
+        "AlternateBase",
+        "ToolTipBase",
+        "ToolTipText",
+        "Text",
+        "MenuText",
+        "Button",
+        "ButtonText",
+        "BrightText",
+        "Link",
+        "Highlight",
+        "HighlightedText",
+        "PlaceholderText",
+        "DisabledText",
+        "DisabledButtonText",
+        "DisabledWindowText",
+    ]
+
+    expected_columns = ["id", "name"] + theme_color_columns
+
+    def _normalize_hex(value):
+        clean = (value or "").strip().upper()
+        if not clean:
+            return "#FFFFFF"
+        return clean
+
+    def _create_themes_table(cur):
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS Themes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                Window TEXT NOT NULL DEFAULT '#FFFFFF',
+                WindowText TEXT NOT NULL DEFAULT '#FFFFFF',
+                Base TEXT NOT NULL DEFAULT '#FFFFFF',
+                AlternateBase TEXT NOT NULL DEFAULT '#FFFFFF',
+                ToolTipBase TEXT NOT NULL DEFAULT '#FFFFFF',
+                ToolTipText TEXT NOT NULL DEFAULT '#FFFFFF',
+                Text TEXT NOT NULL DEFAULT '#FFFFFF',
+                MenuText TEXT NOT NULL DEFAULT '#000000',
+                Button TEXT NOT NULL DEFAULT '#FFFFFF',
+                ButtonText TEXT NOT NULL DEFAULT '#FFFFFF',
+                BrightText TEXT NOT NULL DEFAULT '#FFFFFF',
+                Link TEXT NOT NULL DEFAULT '#FFFFFF',
+                Highlight TEXT NOT NULL DEFAULT '#FFFFFF',
+                HighlightedText TEXT NOT NULL DEFAULT '#FFFFFF',
+                PlaceholderText TEXT NOT NULL DEFAULT '#FFFFFF',
+                DisabledText TEXT NOT NULL DEFAULT '#FFFFFF',
+                DisabledButtonText TEXT NOT NULL DEFAULT '#FFFFFF',
+                DisabledWindowText TEXT NOT NULL DEFAULT '#FFFFFF'
+            )
+        ''')
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_themes_name_unique ON Themes(name COLLATE NOCASE)"
+        )
+
+    conn = None
+    try:
+        conn = sqlite3.connect(connection_string)
+        cursor = conn.cursor()
+
+        cursor.execute("PRAGMA table_info(Themes)")
+        existing_info = cursor.fetchall()
+        existing_columns = [row[1] for row in existing_info]
+
+        if not existing_columns:
+            _create_themes_table(cursor)
+            conn.commit()
+            return True
+
+        needs_migration = set(existing_columns) != set(expected_columns)
+
+        if needs_migration:
+            extracted_rows = []
+
+            if {"theme_name", "item_name", "color_hex"}.issubset(set(existing_columns)):
+                cursor.execute("SELECT theme_name, item_name, color_hex FROM Themes")
+                grouped = {}
+                for theme_name, item_name, color_hex in cursor.fetchall():
+                    clean_theme = (theme_name or "").strip()
+                    clean_item = (item_name or "").strip()
+                    if not clean_theme or clean_item not in theme_color_columns:
+                        continue
+
+                    if clean_theme.lower() not in grouped:
+                        grouped[clean_theme.lower()] = {
+                            "name": clean_theme,
+                            **{c: "#FFFFFF" for c in theme_color_columns}
+                        }
+
+                    grouped[clean_theme.lower()][clean_item] = _normalize_hex(color_hex)
+
+                extracted_rows = list(grouped.values())
+
+            elif "name" in existing_columns:
+                select_columns = [c for c in ["id", "name"] + theme_color_columns if c in existing_columns]
+                quoted_select = ", ".join([f'"{c}"' for c in select_columns])
+                cursor.execute(f"SELECT {quoted_select} FROM Themes")
+
+                for db_row in cursor.fetchall():
+                    row_map = {select_columns[i]: db_row[i] for i in range(len(select_columns))}
+                    clean_name = (row_map.get("name") or "").strip()
+                    if not clean_name:
+                        continue
+
+                    normalized = {
+                        "name": clean_name,
+                        **{c: _normalize_hex(row_map.get(c)) for c in theme_color_columns}
+                    }
+                    extracted_rows.append(normalized)
+
+            deduped_rows = {}
+            for row in extracted_rows:
+                deduped_rows[row["name"].lower()] = row
+
+            cursor.execute("DROP TABLE IF EXISTS Themes")
+            _create_themes_table(cursor)
+
+            insert_columns = ["name"] + theme_color_columns
+            quoted_insert_columns = ", ".join([f'"{c}"' for c in insert_columns])
+            placeholders = ", ".join(["?"] * len(insert_columns))
+
+            for row in deduped_rows.values():
+                values = [row["name"]] + [row.get(c, "#FFFFFF") for c in theme_color_columns]
+                cursor.execute(
+                    f"INSERT INTO Themes ({quoted_insert_columns}) VALUES ({placeholders})",
+                    values
+                )
+
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_themes_name_unique ON Themes(name COLLATE NOCASE)"
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        logging.error(f"Error ensuring Themes table: {e}")
         return False
     finally:
         if conn:
@@ -697,6 +848,166 @@ def save_theme_to_db(conn, theme):
 
 
 @database_operation
+def fetch_custom_theme_names_from_db(conn):
+    """Fetch custom theme names."""
+    ensure_themes_table()
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM Themes ORDER BY name COLLATE NOCASE")
+        return [row[0] for row in cursor.fetchall() if row and row[0]]
+    except Exception as e:
+        logging.error(f"Error fetching custom theme names: {e}")
+        return []
+
+
+@database_operation
+def fetch_custom_theme_items_from_db(conn, theme_name):
+    """Fetch color mapping for a custom theme name."""
+    ensure_themes_table()
+
+    theme_color_columns = [
+        "Window",
+        "WindowText",
+        "Base",
+        "AlternateBase",
+        "ToolTipBase",
+        "ToolTipText",
+        "Text",
+        "MenuText",
+        "Button",
+        "ButtonText",
+        "BrightText",
+        "Link",
+        "Highlight",
+        "HighlightedText",
+        "PlaceholderText",
+        "DisabledText",
+        "DisabledButtonText",
+        "DisabledWindowText",
+    ]
+
+    try:
+        cursor = conn.cursor()
+        quoted_columns = ", ".join([f'"{c}"' for c in theme_color_columns])
+        cursor.execute(
+            f"SELECT {quoted_columns} FROM Themes WHERE LOWER(name) = LOWER(?) LIMIT 1",
+            (theme_name,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return {}
+
+        return {
+            theme_color_columns[i]: ((row[i] or "").strip() or "#FFFFFF")
+            for i in range(len(theme_color_columns))
+        }
+    except Exception as e:
+        logging.error(f"Error fetching custom theme items: {e}")
+        return {}
+
+
+def save_custom_theme_to_db(theme_name, item_colors):
+    """Save or replace a custom theme row."""
+    connection_string = get_connection_string()
+    if not connection_string:
+        return False
+
+    theme_color_columns = [
+        "Window",
+        "WindowText",
+        "Base",
+        "AlternateBase",
+        "ToolTipBase",
+        "ToolTipText",
+        "Text",
+        "MenuText",
+        "Button",
+        "ButtonText",
+        "BrightText",
+        "Link",
+        "Highlight",
+        "HighlightedText",
+        "PlaceholderText",
+        "DisabledText",
+        "DisabledButtonText",
+        "DisabledWindowText",
+    ]
+
+    def _normalize_hex(value):
+        clean = (value or "").strip().upper()
+        if not clean:
+            return "#FFFFFF"
+        return clean
+
+    clean_theme_name = (theme_name or "").strip()
+    if not clean_theme_name:
+        return False
+
+    conn = None
+    try:
+        ensure_themes_table()
+        conn = sqlite3.connect(connection_string)
+        cursor = conn.cursor()
+
+        normalized_colors = {
+            col: _normalize_hex((item_colors or {}).get(col, "#FFFFFF"))
+            for col in theme_color_columns
+        }
+
+        set_clause = ", ".join([f'"{col}" = ?' for col in theme_color_columns])
+        cursor.execute(
+            f"UPDATE Themes SET {set_clause}, name = ? WHERE LOWER(name) = LOWER(?)",
+            [normalized_colors[col] for col in theme_color_columns] + [clean_theme_name, clean_theme_name]
+        )
+
+        if cursor.rowcount == 0:
+            insert_columns = ["name"] + theme_color_columns
+            quoted_insert_columns = ", ".join([f'"{c}"' for c in insert_columns])
+            placeholders = ", ".join(["?"] * len(insert_columns))
+            insert_values = [clean_theme_name] + [normalized_colors[col] for col in theme_color_columns]
+            cursor.execute(
+                f"INSERT INTO Themes ({quoted_insert_columns}) VALUES ({placeholders})",
+                insert_values
+            )
+
+        conn.commit()
+        return True
+    except Exception as e:
+        logging.error(f"Error saving custom theme: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def delete_custom_theme_from_db(theme_name):
+    """Delete a custom theme row by name."""
+    connection_string = get_connection_string()
+    if not connection_string:
+        return False
+
+    clean_theme_name = (theme_name or "").strip()
+    if not clean_theme_name:
+        return False
+
+    conn = None
+    try:
+        ensure_themes_table()
+        conn = sqlite3.connect(connection_string)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM Themes WHERE LOWER(name) = LOWER(?)", (clean_theme_name,))
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        logging.error(f"Error deleting custom theme: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+@database_operation
 def fetch_window_from_db(conn):
     """Fetch window mode setting from database."""
     try:
@@ -1042,6 +1353,7 @@ def initialize_database():
             ensure_schedule_color_column()
             ensure_colors_table()
             ensure_window_column()
+            ensure_themes_table()
             logging.info("Database initialized successfully")
         return success
     except Exception as e:

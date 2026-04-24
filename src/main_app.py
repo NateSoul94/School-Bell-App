@@ -26,10 +26,11 @@ import logging
 from functools import partial
 
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, 
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QTableWidget, 
     QTableWidgetItem, QPushButton, QSlider, QFrame, QLCDNumber, QProgressBar,
     QHeaderView, QComboBox, QCheckBox, QSystemTrayIcon, QMenu, QSizePolicy,
-    QStyledItemDelegate
+    QStyledItemDelegate, QDialog, QFormLayout, QLineEdit, QColorDialog,
+    QDialogButtonBox
 )
 from PyQt6.QtGui import QIcon, QGuiApplication, QPixmap, QColor, QBrush, QPalette
 from PyQt6.QtCore import QTimer, Qt, QEvent, pyqtSignal
@@ -50,7 +51,8 @@ from database import (
     fetch_days_from_db, update_day_status_in_db, save_day_preset_in_db,
     fetch_preset_for_day, update_schedule_in_db, insert_schedule_row, delete_schedule_row,
     create_preset, delete_preset, initialize_database, test_database_connection,
-    fetch_colors_from_db
+    fetch_colors_from_db, fetch_custom_theme_names_from_db,
+    fetch_custom_theme_items_from_db, save_custom_theme_to_db, delete_custom_theme_from_db
 )
 from audio_manager import get_audio_manager, stop_audio
 from schedule_manager import get_schedule_manager, get_local_time, get_day_name
@@ -63,6 +65,28 @@ from ui_components import (
     show_info_message, show_error_message, show_warning_message, show_question_dialog,
     get_text_input, get_integer_input, select_file, select_directory, select_font
 )
+
+
+THEME_COLOR_ITEMS = [
+    "Window",
+    "WindowText",
+    "Base",
+    "AlternateBase",
+    "ToolTipBase",
+    "ToolTipText",
+    "Text",
+    "MenuText",
+    "Button",
+    "ButtonText",
+    "BrightText",
+    "Link",
+    "Highlight",
+    "HighlightedText",
+    "PlaceholderText",
+    "DisabledText",
+    "DisabledButtonText",
+    "DisabledWindowText",
+]
 
 
 class CheckableAudioComboBox(QComboBox):
@@ -161,6 +185,84 @@ class AudioFileComboDelegate(QStyledItemDelegate):
     def _commit_and_close_editor(self, editor):
         self.commitData.emit(editor)
         self.closeEditor.emit(editor, QStyledItemDelegate.EndEditHint.NoHint)
+
+
+class CustomThemeEditorDialog(QDialog):
+    """Dialog to create or edit a custom theme with live preview."""
+
+    def __init__(self, parent_app, seed_theme_name, seed_colors, allow_delete=False):
+        super().__init__(parent_app)
+        self.parent_app = parent_app
+        self._delete_requested = False
+        self.setWindowTitle("Custom Themes")
+        self.setModal(True)
+        self.resize(760, 500)
+
+        self._colors = {item: seed_colors.get(item, "#FFFFFF") for item in THEME_COLOR_ITEMS}
+        self._color_buttons = {}
+
+        main_layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+
+        self.theme_name_input = QLineEdit(self)
+        self.theme_name_input.setText(seed_theme_name or "")
+        self.theme_name_input.setPlaceholderText("Theme name")
+        form_layout.addRow("Theme Name", self.theme_name_input)
+
+        colors_grid = QGridLayout()
+        for index, item_name in enumerate(THEME_COLOR_ITEMS):
+            row = index // 2
+            column_offset = (index % 2) * 2
+
+            item_label = QLabel(item_name, self)
+            button = QPushButton(self._colors[item_name], self)
+            button.clicked.connect(partial(self._pick_color_for_item, item_name))
+            self._set_button_preview(button, self._colors[item_name])
+            self._color_buttons[item_name] = button
+            colors_grid.addWidget(item_label, row, column_offset)
+            colors_grid.addWidget(button, row, column_offset + 1)
+
+        main_layout.addLayout(form_layout)
+        main_layout.addLayout(colors_grid)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel, self)
+        if allow_delete:
+            delete_button = button_box.addButton("Delete Theme", QDialogButtonBox.ButtonRole.DestructiveRole)
+            delete_button.clicked.connect(self._request_delete)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        main_layout.addWidget(button_box)
+
+        self._emit_live_preview()
+
+    def _set_button_preview(self, button, color_hex):
+        button.setText(color_hex)
+        button.setStyleSheet(f"background-color: {color_hex};")
+
+    def _pick_color_for_item(self, item_name):
+        current_color = QColor(self._colors.get(item_name, "#FFFFFF"))
+        picked = QColorDialog.getColor(current_color, self, f"Choose {item_name} Color")
+        if not picked.isValid():
+            return
+
+        color_hex = picked.name().upper()
+        self._colors[item_name] = color_hex
+        self._set_button_preview(self._color_buttons[item_name], color_hex)
+        self._emit_live_preview()
+
+    def _emit_live_preview(self):
+        if self.parent_app and hasattr(self.parent_app, "preview_custom_theme"):
+            self.parent_app.preview_custom_theme(self._colors)
+
+    def get_theme_payload(self):
+        return (self.theme_name_input.text().strip(), dict(self._colors))
+
+    def _request_delete(self):
+        self._delete_requested = True
+        self.accept()
+
+    def delete_requested(self):
+        return self._delete_requested
 
 
 class SchoolBellApp(QMainWindow):
@@ -1201,6 +1303,95 @@ class SchoolBellApp(QMainWindow):
             self.help_window.show()
         except Exception as e:
             logging.error(f"Error opening help window: {e}")
+
+    def open_custom_theme_editor(self):
+        """Open custom theme editor dialog with live preview support."""
+        try:
+            from PyQt6.QtWidgets import QApplication
+
+            app = QApplication.instance()
+            if app is None:
+                return
+
+            previous_theme = fetch_theme_from_db()
+            current_palette_colors = self._extract_theme_items_from_palette(app.palette())
+
+            selected_theme_name = ""
+            if self.menu_bar and self.menu_bar.theme_combo:
+                selected_theme_name = self.menu_bar.theme_combo.currentText().strip()
+
+            if not selected_theme_name or selected_theme_name in ["Default", "Dark", "Light", "Sky Blue", "Navy Blue"]:
+                selected_theme_name = ""
+
+            if selected_theme_name:
+                saved_items = fetch_custom_theme_items_from_db(selected_theme_name)
+                if saved_items:
+                    current_palette_colors = {
+                        item: saved_items.get(item, current_palette_colors.get(item, "#FFFFFF"))
+                        for item in THEME_COLOR_ITEMS
+                    }
+
+            dialog = CustomThemeEditorDialog(
+                self,
+                selected_theme_name,
+                current_palette_colors,
+                allow_delete=bool(selected_theme_name)
+            )
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                if dialog.delete_requested():
+                    if not selected_theme_name:
+                        self.apply_theme(previous_theme)
+                        show_warning_message("Select a saved custom theme first, then open Custom Themes to delete it.")
+                        return
+
+                    if not show_question_dialog(
+                        f"Delete custom theme '{selected_theme_name}'?",
+                        "Delete Custom Theme",
+                        self
+                    ):
+                        self.apply_theme(previous_theme)
+                        return
+
+                    if not delete_custom_theme_from_db(selected_theme_name):
+                        self.apply_theme(previous_theme)
+                        show_error_message("Failed to delete custom theme")
+                        return
+
+                    fallback_theme = "Default" if (previous_theme or "").strip().lower() == selected_theme_name.lower() else previous_theme
+                    if self.menu_bar and hasattr(self.menu_bar, "refresh_theme_options"):
+                        self.menu_bar.refresh_theme_options(selected_theme=fallback_theme)
+                    self.apply_theme(fallback_theme)
+                    show_info_message(f"Custom theme '{selected_theme_name}' deleted")
+                    return
+
+                theme_name, item_colors = dialog.get_theme_payload()
+                if not theme_name:
+                    self.apply_theme(previous_theme)
+                    show_warning_message("Theme name cannot be empty")
+                    return
+
+                built_in_themes = {"default", "dark", "light", "sky blue", "navy blue"}
+                if theme_name.strip().lower() in built_in_themes:
+                    self.apply_theme(previous_theme)
+                    show_warning_message("Please choose a different name. Built-in theme names are reserved.")
+                    return
+
+                if not save_custom_theme_to_db(theme_name, item_colors):
+                    self.apply_theme(previous_theme)
+                    show_error_message("Failed to save custom theme")
+                    return
+
+                if self.menu_bar and hasattr(self.menu_bar, "refresh_theme_options"):
+                    self.menu_bar.refresh_theme_options(selected_theme=theme_name)
+
+                self.apply_theme(theme_name)
+                show_info_message(f"Custom theme '{theme_name}' saved")
+            else:
+                self.apply_theme(previous_theme)
+
+        except Exception as e:
+            logging.error(f"Error opening custom theme editor: {e}")
+            show_error_message(f"Error opening custom theme editor: {e}")
     
     def toggle_full_screen(self):
         """Toggle full screen mode."""
@@ -1212,8 +1403,72 @@ class SchoolBellApp(QMainWindow):
             self.is_full_screen = not self.is_full_screen
         except Exception as e:
             logging.error(f"Error toggling full screen: {e}")
+
+    def _extract_theme_items_from_palette(self, palette):
+        """Convert a QPalette into the editable custom-theme item dictionary."""
+        return {
+            "Window": palette.color(QPalette.ColorRole.Window).name().upper(),
+            "WindowText": palette.color(QPalette.ColorRole.WindowText).name().upper(),
+            "Base": palette.color(QPalette.ColorRole.Base).name().upper(),
+            "AlternateBase": palette.color(QPalette.ColorRole.AlternateBase).name().upper(),
+            "ToolTipBase": palette.color(QPalette.ColorRole.ToolTipBase).name().upper(),
+            "ToolTipText": palette.color(QPalette.ColorRole.ToolTipText).name().upper(),
+            "Text": palette.color(QPalette.ColorRole.Text).name().upper(),
+            "Button": palette.color(QPalette.ColorRole.Button).name().upper(),
+            "ButtonText": palette.color(QPalette.ColorRole.ButtonText).name().upper(),
+            "BrightText": palette.color(QPalette.ColorRole.BrightText).name().upper(),
+            "Link": palette.color(QPalette.ColorRole.Link).name().upper(),
+            "Highlight": palette.color(QPalette.ColorRole.Highlight).name().upper(),
+            "HighlightedText": palette.color(QPalette.ColorRole.HighlightedText).name().upper(),
+            "PlaceholderText": palette.color(QPalette.ColorRole.PlaceholderText).name().upper(),
+            "DisabledText": palette.color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text).name().upper(),
+            "DisabledButtonText": palette.color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText).name().upper(),
+            "DisabledWindowText": palette.color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText).name().upper(),
+        }
+
+    def _build_palette_from_theme_items(self, item_colors):
+        """Create a QPalette from custom item color mappings."""
+        palette = QPalette()
+
+        def _color_for(name, fallback):
+            return QColor((item_colors or {}).get(name, fallback))
+
+        palette.setColor(QPalette.ColorRole.Window, _color_for("Window", "#F0F0F0"))
+        palette.setColor(QPalette.ColorRole.WindowText, _color_for("WindowText", "#000000"))
+        palette.setColor(QPalette.ColorRole.Base, _color_for("Base", "#FFFFFF"))
+        palette.setColor(QPalette.ColorRole.AlternateBase, _color_for("AlternateBase", "#F5F5F5"))
+        palette.setColor(QPalette.ColorRole.ToolTipBase, _color_for("ToolTipBase", "#FFFFFF"))
+        palette.setColor(QPalette.ColorRole.ToolTipText, _color_for("ToolTipText", "#000000"))
+        palette.setColor(QPalette.ColorRole.Text, _color_for("Text", "#000000"))
+        palette.setColor(QPalette.ColorRole.Button, _color_for("Button", "#E9E9E9"))
+        palette.setColor(QPalette.ColorRole.ButtonText, _color_for("ButtonText", "#000000"))
+        palette.setColor(QPalette.ColorRole.BrightText, _color_for("BrightText", "#D00000"))
+        palette.setColor(QPalette.ColorRole.Link, _color_for("Link", "#0066CC"))
+        palette.setColor(QPalette.ColorRole.Highlight, _color_for("Highlight", "#0078D7"))
+        palette.setColor(QPalette.ColorRole.HighlightedText, _color_for("HighlightedText", "#FFFFFF"))
+        palette.setColor(QPalette.ColorRole.PlaceholderText, _color_for("PlaceholderText", "#666666"))
+        palette.setColor(
+            QPalette.ColorGroup.Disabled,
+            QPalette.ColorRole.Text,
+            _color_for("DisabledText", "#777777")
+        )
+        palette.setColor(
+            QPalette.ColorGroup.Disabled,
+            QPalette.ColorRole.ButtonText,
+            _color_for("DisabledButtonText", "#777777")
+        )
+        palette.setColor(
+            QPalette.ColorGroup.Disabled,
+            QPalette.ColorRole.WindowText,
+            _color_for("DisabledWindowText", "#777777")
+        )
+        return palette
+
+    def preview_custom_theme(self, item_colors):
+        """Apply an in-memory preview of custom theme colors without saving."""
+        self.apply_theme("Custom Preview", persist=False, custom_items=item_colors)
     
-    def apply_theme(self, theme_name):
+    def apply_theme(self, theme_name, persist=True, custom_items=None):
         """Apply the specified theme."""
         try:
             from PyQt6.QtWidgets import QApplication
@@ -1229,7 +1484,17 @@ class SchoolBellApp(QMainWindow):
                 # Capture the startup palette once so Default can always restore it.
                 self._original_system_palette = QPalette(app.palette())
 
-            if theme_key == "default":
+            custom_theme_names = fetch_custom_theme_names_from_db() or []
+            matched_custom_theme = None
+            active_custom_items = custom_items if custom_items else None
+            for custom_name in custom_theme_names:
+                if custom_name.strip().lower() == theme_key:
+                    matched_custom_theme = custom_name
+                    break
+
+            if custom_items:
+                app.setPalette(self._build_palette_from_theme_items(custom_items))
+            elif theme_key == "default":
                 # Restore the original app palette captured at startup.
                 app.setPalette(QPalette(self._original_system_palette))
             elif theme_key == "dark":
@@ -1309,6 +1574,10 @@ class SchoolBellApp(QMainWindow):
                 navy_palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor("#8A97AE"))
                 navy_palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor("#8A97AE"))
                 app.setPalette(navy_palette)
+            elif matched_custom_theme:
+                custom_theme_items = fetch_custom_theme_items_from_db(matched_custom_theme)
+                active_custom_items = custom_theme_items
+                app.setPalette(self._build_palette_from_theme_items(custom_theme_items))
             else:
                 app.setPalette(app.style().standardPalette())
 
@@ -1346,10 +1615,31 @@ class SchoolBellApp(QMainWindow):
                     }
                 """
                 self.setStyleSheet(base_font_style + navy_contrast_overrides)
+            elif active_custom_items:
+                menu_text_color = active_custom_items.get("MenuText") or active_custom_items.get("Text", "#000000")
+                disabled_text_color = active_custom_items.get("DisabledText", "#777777")
+                custom_text_overrides = f"""
+                    QMenuBar, QMenuBar::item, QMenu, QMenu::item,
+                    QHeaderView::section, QComboBox, QComboBox QAbstractItemView,
+                    QPushButton {{
+                        color: {menu_text_color};
+                    }}
+                    QMenu::item:disabled, QMenuBar::item:disabled,
+                    QPushButton:disabled, QComboBox:disabled {{
+                        color: {disabled_text_color};
+                    }}
+                """
+                self.setStyleSheet(base_font_style + custom_text_overrides)
             else:
                 self.setStyleSheet(base_font_style)
 
-            save_theme_to_db(theme_name)
+            if persist:
+                save_theme_to_db(theme_name)
+
+            if self.menu_bar and hasattr(self.menu_bar, "refresh_theme_options"):
+                selected_name = theme_name if persist else self.menu_bar.theme_combo.currentText()
+                self.menu_bar.refresh_theme_options(selected_theme=selected_name)
+
             logging.info(f"Theme applied: {theme_name}")
             
         except Exception as e:
